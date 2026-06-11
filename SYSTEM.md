@@ -253,19 +253,19 @@ Firecrawl работает со своими прокси/без прокси (�
 
 ```bash
 # Запуск парсера (offers)
-docker compose --profile manual run --rm parser_cian python -m services.parser_cian.main --mode offers
+docker compose --profile manual run --rm parser_cian --mode offers
 
 # Запуск парсера (avans)
-docker compose --profile manual run --rm parser_cian python -m services.parser_cian.main --mode avans
+docker compose --profile manual run --rm parser_cian --mode avans
 
 # Только сбор ссылок (без парсинга карточек)
-docker compose --profile manual run --rm parser_cian python -m services.parser_cian.main --mode offers --only-links
+docker compose --profile manual run --rm parser_cian --mode offers --only-links
 
 # Парсинг без сбора ссылок (из БД)
-docker compose --profile manual run --rm parser_cian python -m services.parser_cian.main --mode offers --skip-links
+docker compose --profile manual run --rm parser_cian --mode offers --skip-links
 
 # Alias (старое имя режима)
-# docker compose --profile manual run --rm parser_cian python -m services.parser_cian.main --mode regular
+# docker compose --profile manual run --rm parser_cian --mode regular
 
 # Подсчёт категорий
 docker compose --profile manual run --rm category_counter python -m services.category_counter.main

@@ -3,7 +3,7 @@ services.parser_cian.parser - AdParser for self-hosted Firecrawl integration
 
 Парсер объявлений недвижимости с использованием self-hosted Firecrawl API.
 Данные поступают из трёх источников:
-  1. Firecrawl JSON (AI-экстракция через GLM-4.7-Flash / OpenRouter)
+  1. Firecrawl /v2/cian/scrape (статический парсер; LLM только при fallback)
   2. rawHtml страницы (creationDate из embedded JSON скриптов)
   3. Cian Statistics API (days_in_exposition, total_views, unique_views)
 """
@@ -376,50 +376,12 @@ def _clean_cian_description(raw: str) -> str:
     return out
 
 
-# System prompt для AI-экстракции
-SYSTEM_PROMPT = (
-    "Экстрактор объявлений Cian.ru: заполни поля по схеме из markdown; нет данных — null. "
-    "ВАЖНО: housing_type — это 'Тип жилья' из раздела 'О квартире' (Вторичка или Новостройка). "
-    "building_type — ТОЛЬКО строка 'Тип дома' в блоке 'О доме' (Панельный, Кирпичный, Монолитный…). "
-    "Если строки 'Тип дома' на странице нет — building_type = null. "
-    "НИКОГДА не подставляй сюда 'Строительную серию' (Индивидуальный проект, II-49, П-44Т и т.п.). "
-    "renovation — тип ремонта из 'О квартире'. district — район, okrug — ЦАО, ЮВАО и т.д. "
-    "description — только связный текст описания продавца (может быть коротким, 1–2 предложения). "
-    "НИКОГДА не копируй блок «О доме» (Строительная серия, П-44, лифты, перекрытия), "
-    "виджеты «Ипотечный калькулятор», «Спросите умного помощника», карточки риелторов/«Суперагент», "
-    "«Показать телефон», хлебные крошки, списки метро (* … мин), «На карте», «Скачать», «Пожаловаться», "
-    "дубли строк «Общая площадь / Этаж / Год постройки» (эти поля уже в других полях схемы). "
-    "Просмотры: «X просмотров, Y за сегодня» — X→total_views, Y→unique_views. "
-    "is_active: true, если карточка доступна. "
-    "has_avans_deposit: true если на странице есть признаки, что за объект внесён "
-    "аванс/задаток/обеспечительный платёж (покупатель уже забронировал квартиру). "
-    "Это может быть не только в описании/заголовке продавца, но и в бейдже/уведомлении "
-    "в верхней части карточки (например: «За объект уже внесли аванс»). "
-    "Просто наличие слова «аванс» в описании НЕ достаточно — нужен смысловой контекст "
-    "подтверждения внесения платежа. false если таких сведений нет. "
-    "price_history: строки таблицы 'История цены' в хронологическом порядке (сначала старые события), "
-    "для каждой строки: date в формате YYYY-MM-DD и price; сумму изменения и тип пересчитает бэкенд."
-)
-
-# Теги для исключения из HTML перед конвертацией в markdown
-EXCLUDE_TAGS = [
-    "svg",
-    "img",
-    "script",
-    "style",
-    "footer",
-    "header",
-    # "[data-name='CardSectionNew']",
-    "[data-name='OfferCardPageLayoutFooter']",
-    "[id='adfox-stretch-banner']",
-]
-
 class AdParser:
     """
     Парсер объявлений Cian через self-hosted Firecrawl API v2.
 
     Источники данных:
-    - Firecrawl JSON: основные поля через AI-экстракцию (GLM-4.7-Flash)
+    - Firecrawl /v2/cian/scrape: основные поля (статический парсер, LLM fallback)
     - rawHtml: creationDate для запроса статистики
     - Cian API: days_in_exposition, total_views, unique_views (точные данные)
 
@@ -447,7 +409,7 @@ class AdParser:
         self.api_key = (firecrawl_api_key or os.getenv("FIRECRAWL_API_KEY", "test-key")).strip()
 
         base = (firecrawl_base_url or os.getenv("FIRECRAWL_BASE_URL", "http://localhost:3002")).rstrip("/")
-        self.firecrawl_api_url = f"{base}/v2/scrape"
+        self.firecrawl_api_url = f"{base}/v2/cian/scrape"
 
         self.cookie_manager_url = cookie_manager_url.rstrip("/")
         self._cookies_lock = asyncio.Lock()
@@ -779,141 +741,15 @@ class AdParser:
             logger.error(f"❌ Ошибка получения статистики: {e}")
             return None, None, None
 
-    def _get_schema(self) -> Dict[str, Any]:
-        """
-        JSON Schema для AI-экстракции через Firecrawl.
-        Использует вложенные объекты address и floor_info.
-        """
-        return {
-            "type": "object",
-            "properties": {
-                "cian_id": {
-                    "type": "string",
-                    "description": "ID объявления из URL (число в конце /sale/flat/XXXXXX/)",
-                },
-                "price": {"type": "integer", "description": "Цена в рублях"},
-                "price_per_m2": {"type": "integer", "description": "Цена за м²"},
-                "title": {"type": "string", "description": "Заголовок объявления"},
-                "description": {
-                    "type": "string",
-                    "description": "Только текст описания продавца: без markdown-навигации, хлебных крошек, "
-                    "списков метро, кнопок «Скачать». Без дубля строк параметров (площадь/этаж/год).",
-                },
-                "address": {
-                    "type": "object",
-                    "properties": {
-                        "full": {"type": "string", "description": "Полный адрес объекта как указан на странице"},
-                        "district": {
-                            "type": "string",
-                            "description": "Район Москвы (например: Лефортово, Хамовники, Южнопортовый, Останкинский, Котловка). Берётся из хлебных крошек или адресной строки после 'р-н'.",
-                        },
-                        "metro_station": {
-                            "type": "string",
-                            "description": "Ближайшая станция метро (только название, без слова 'метро')",
-                        },
-                        "okrug": {
-                            "type": "string",
-                            "description": "Административный округ Москвы — аббревиатура: ЦАО, ЮВАО, СВАО, ЗАО, ЮЗАО, САО, ВАО, СЗАО, ЮАО и т.д.",
-                        },
-                    },
-                },
-                "area": {"type": "number", "description": "Общая площадь в м²"},
-                "rooms": {"type": "integer", "description": "Количество комнат"},
-                "housing_type": {
-                    "type": "string",
-                    "description": "Тип жилья из раздела 'О квартире' — только 'Вторичка' или 'Новостройка'. НЕ путать с типом дома.",
-                },
-                "building_type": {
-                    "type": ["string", "null"],
-                    "description": "Только поле 'Тип дома' в блоке 'О доме' (Панельный, Кирпичный, Монолитный…). "
-                    "Если строки 'Тип дома' нет — null. НЕ брать 'Строительную серию' (Индивидуальный проект, II-49, П-44Т).",
-                },
-                "floor_info": {
-                    "type": "object",
-                    "properties": {
-                        "current": {"type": "integer", "description": "Этаж квартиры"},
-                        "all": {
-                            "type": "integer",
-                            "description": "Всего этажей в доме",
-                        },
-                    },
-                },
-                "construction_year": {
-                    "type": "integer",
-                    "description": "Год постройки дома",
-                },
-                "renovation": {
-                    "type": "string",
-                    "description": "Тип ремонта из раздела 'О квартире' — например: Евроремонт, Косметический, Дизайнерский, Без ремонта. НЕ путать с типом дома.",
-                },
-                "metro_walk_time": {
-                    "type": "integer",
-                    "description": "Минут пешком до БЛИЖАЙШЕЙ станции метро",
-                },
-                "total_views": {
-                    "type": "integer",
-                    "description": "Всего просмотров — число ДО запятой в строке 'X просмотров, Y за сегодня'",
-                },
-                "unique_views": {
-                    "type": "integer",
-                    "description": "Просмотров сегодня — число ПОСЛЕ запятой в строке 'X просмотров, Y за сегодня'",
-                },
-                "is_active": {
-                    "type": "boolean",
-                    "description": "Активно ли объявление. False если 'снято с публикации', 'снято с продажи'.",
-                },
-                "has_avans_deposit": {
-                    "type": "boolean",
-                    "description": (
-                        "True если на странице есть признак, что за данный объект внесён аванс "
-                        "(задаток, обеспечительный платёж). Важно: это может быть отдельный бейдж/"
-                        "уведомление в верхней части карточки (например: «За объект уже внесли аванс»), "
-                        "а не только текст описания продавца. "
-                        "Примеры: «внесён аванс», «принят задаток», «за квартиру внесли аванс», "
-                        "«объект снят с продажи — внесён задаток», «получен аванс». "
-                        "Если таких упоминаний нет — false."
-                    ),
-                },
-                "price_history": {
-                    "type": "array",
-                    "description": "История изменения цены (если есть раздел 'История цены')",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "date": {
-                                "type": "string",
-                                "description": "Дата изменения (например: '10 мар 2026')",
-                            },
-                            "price": {
-                                "type": "integer",
-                                "description": "Цена в рублях на эту дату",
-                            },
-                            "change_amount": {
-                                "type": "integer",
-                                "description": "Опционально; пересчитывается на сервере по порядку строк.",
-                            },
-                            "change_type": {
-                                "type": "string",
-                                "enum": ["initial", "decrease", "increase"],
-                                "description": "Опционально; пересчитывается на сервере.",
-                            },
-                        },
-                        "required": ["date", "price"],
-                    },
-                },
-            },
-            "required": ["price", "area", "cian_id"],
-        }
-
     async def parse_async(self, url: str) -> ParsedAdData:
         """
         Парсит одно объявление через self-hosted Firecrawl API.
 
         Этапы:
         1. Получаем куки из Cookie Manager
-        2. Запрашиваем Firecrawl: markdown + rawHtml + json(AI)
+        2. Запрашиваем Firecrawl /v2/cian/scrape (статический парсер + rawHtml)
         3. Из rawHtml извлекаем creationDate
-        4. Из Cian API получаем точную статистику (переопределяет AI данные)
+        4. Из Cian API получаем точную статистику (переопределяет данные карточки)
         5. Собираем ParsedAdData
 
         Args:
@@ -938,20 +774,10 @@ class AdParser:
                 "Cookies are empty. Recovery triggered. Please retry later."
             )
 
-        # 2. Формируем payload для Firecrawl
+        # 2. Минимальный payload для /v2/cian/scrape (схема и промпт на стороне flippercrawl)
         payload = {
             "url": url,
-            "excludeTags": EXCLUDE_TAGS,
-            "formats": [
-                "markdown",  # Для AI-экстракции (передается в LLM)
-                "rawHtml",   # Для извлечения creationDate из embedded JSON
-                {
-                    "type": "json",
-                    "schema": self._get_schema(),
-                    "systemPrompt": SYSTEM_PROMPT,
-                },
-            ],
-            "headers": {"Cookie": cookies_str} if cookies_str else {},
+            "headers": {"Cookie": cookies_str},
         }
 
         headers = {
@@ -1044,7 +870,7 @@ class AdParser:
                     "Firecrawl returned Cian captcha page (incomplete cian page)"
                 )
 
-            # 4. Проверяем наличие JSON данных от AI
+            # 4. Проверяем наличие JSON данных
             if "json" not in data_obj:
                 logger.warning(
                     f"No JSON data extracted for {url}, checking authentication..."
@@ -1055,11 +881,16 @@ class AdParser:
                     await self._check_and_trigger_recovery()
                     raise ValueError("Authentication failed. Recovery triggered.")
                 raise ValueError(
-                    "No JSON data extracted: Firecrawl не вернул json (сбой/таймаут LLM или пустая схема); "
+                    "No JSON data extracted: Firecrawl не вернул json (сбой статики/LLM fallback); "
                     "профиль my.cian.ru при этом доступен — это не обязательно проблема куков."
                 )
 
             extracted_data = data_obj["json"]
+            extraction_mode = extracted_data.pop("_extraction_mode", None)
+            if extraction_mode:
+                logger.info(
+                    "Cian scrape extraction_mode=%s for %s", extraction_mode, url
+                )
             extracted_data["url"] = url
 
             # 5. Получаем точную статистику из Cian API (переопределяет AI данные)

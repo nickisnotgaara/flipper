@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Печатает JSON body для POST {FIRECRAWL_BASE_URL}/v2/scrape — как в AdParser.parse_async:
-excludeTags=EXCLUDE_TAGS, formats: markdown, rawHtml, json(schema=_get_schema(), systemPrompt=SYSTEM_PROMPT).
+Печатает JSON body для POST {FIRECRAWL_BASE_URL}/v2/cian/scrape — как в AdParser.parse_async:
+только url и опционально headers.Cookie.
 
 Запуск из корня репозитория:
   python scripts/dump_firecrawl_scrape_body.py
@@ -19,7 +19,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from services.parser_cian.parser import AdParser, EXCLUDE_TAGS, SYSTEM_PROMPT  # noqa: E402
+
+def build_cian_scrape_body(url: str, cookie: str = "") -> dict:
+    body: dict = {"url": url.strip()}
+    if cookie.strip():
+        body["headers"] = {"Cookie": cookie.strip()}
+    return body
 
 
 def main() -> None:
@@ -33,7 +38,7 @@ def main() -> None:
     ap.add_argument(
         "--cookie",
         default="",
-        help="Строка Cookie для Циан (пусто = без headers, как при отсутствии куков)",
+        help="Строка Cookie для Циан (пусто = без headers)",
     )
     ap.add_argument(
         "-o",
@@ -43,23 +48,7 @@ def main() -> None:
     )
     args = ap.parse_args()
 
-    p = AdParser()
-    body: dict = {
-        "url": args.url.strip(),
-        "excludeTags": EXCLUDE_TAGS,
-        "formats": [
-            "markdown",
-            "rawHtml",
-            {
-                "type": "json",
-                "schema": p._get_schema(),
-                "systemPrompt": SYSTEM_PROMPT,
-            },
-        ],
-    }
-    if args.cookie.strip():
-        body["headers"] = {"Cookie": args.cookie.strip()}
-
+    body = build_cian_scrape_body(args.url, args.cookie)
     text = json.dumps(body, ensure_ascii=False, indent=2)
     if args.output.strip():
         Path(args.output.strip()).write_text(text, encoding="utf-8")

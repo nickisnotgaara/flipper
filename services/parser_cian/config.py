@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     """API ключ для Firecrawl (обязательно)"""
 
     firecrawl_base_url: str = "http://localhost:3002"
-    """Self-hosted Firecrawl (без /v2/scrape). В Docker: http://flippercrawl-api-1:3002"""
+    """Self-hosted Firecrawl (эндпоинт /v2/cian/scrape). В Docker: http://flippercrawl-api-1:3002"""
 
     use_proxies_for_search: bool = Field(
         default=True,
