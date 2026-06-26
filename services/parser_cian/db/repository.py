@@ -161,6 +161,13 @@ class DatabaseRepository:
     ):
         async with _base.AsyncSessionLocal() as session:
             for url in urls:
+                # Filter out regional subdomains
+                from urllib.parse import urlparse
+                host = urlparse(url).hostname or ""
+                if host != "www.cian.ru":
+                    logger.info("add_ad_urls: skipping regional URL: %s", url)
+                    continue
+
                 stmt = (
                     pg_insert(CianActiveAd)
                     .values(url=url, filter_id=filter_id, source=source)
@@ -178,6 +185,14 @@ class DatabaseRepository:
             s = str(u).strip()
             if not s or s in seen:
                 continue
+
+            # Filter out regional subdomains
+            from urllib.parse import urlparse
+            host = urlparse(s).hostname or ""
+            if host != "www.cian.ru":
+                logger.info("merge_active_ad_urls: skipping regional URL: %s", s)
+                continue
+
             seen.add(s)
             ordered_unique.append(s)
 

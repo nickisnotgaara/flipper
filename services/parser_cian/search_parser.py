@@ -105,6 +105,14 @@ def extract_ad_urls_from_search(
                     if clean_url.endswith("/"):
                         clean_url = clean_url[:-1]  # Нормализуем слеш
                     clean_url += "/" # Добавим обратно чтобы все были /
+                    
+                    # Filter out regional subdomains
+                    from urllib.parse import urlparse
+                    host = urlparse(clean_url).hostname or ""
+                    if host != "www.cian.ru":
+                        logger.info(f"Skipping regional subdomain URL: {clean_url} (host={host})")
+                        continue
+                    
                     page_urls.append(clean_url)
             
             if not page_urls:

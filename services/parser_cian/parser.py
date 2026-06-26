@@ -760,6 +760,15 @@ class AdParser:
         """
         logger.info(f"🔍 Начинаю парсинг: {url}")
 
+        # Reject regional subdomains early
+        from urllib.parse import urlparse
+        host = urlparse(url).hostname or ""
+        if host != "www.cian.ru":
+            raise ValueError(
+                f"Rejected non-main-domain URL: {url} (host={host}). "
+                f"Only www.cian.ru is allowed."
+            )
+
         # Jitter: случайная задержка 1-4 сек чтобы не выглядеть ботом
         import random
         await asyncio.sleep(random.uniform(1.0, 4.0))
