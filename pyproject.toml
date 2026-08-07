@@ -1,0 +1,79 @@
+[project]
+name = "flipper"
+version = "0.5.0"
+description = "Moscow real-estate flipping system: parsers + map API"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "Flipper Team" }]
+
+# Runtime dependencies live in per-service requirements.txt (services/api,
+# services/scheduler, services/pipeline_runner, services/parsers/*) — each
+# service is built into its own Docker image with only what it needs.
+#
+# This pyproject.toml is the source of truth for DEV tooling and project
+# metadata. To install dev tools: `pip install -e ".[dev]"` (or use uv/poetry
+# to generate a lockfile from this file).
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "respx>=0.21",
+    "ruff>=0.6",
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# pytest
+# ─────────────────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = [
+    "packages/flipper_db/tests",
+    "services/parsers",
+    "scripts/tests",
+]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ruff — fast linter/formatter (replaces flake8 + isort + black)
+# ─────────────────────────────────────────────────────────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [
+    "archive/",
+    "services/parser_cian/",   # legacy v1 (slated for removal)
+    "data/",
+    ".venv/",
+]
+
+[tool.ruff.lint]
+# E/W = pycodestyle, F = pyflakes, I = isort, B = bugbear, UP = pyupgrade
+select = ["E", "W", "F", "I", "B", "UP"]
+ignore = [
+    "E501",   # line too long (formatter handles)
+    "B008",   # function call in default arg (FastAPI Depends)
+    "UP007",  # use X | Y (keep Optional for compat)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/_*.py" = ["F401"]  # debug scripts may have unused imports
+"**/__init__.py" = ["F401"]  # re-exports
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Build (this project is not published to PyPI — metadata only)
+# ─────────────────────────────────────────────────────────────────────────────
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# No packages are installed from this repo (services are Docker-built from
+# their own requirements.txt). pyproject.toml is metadata + tool config only.
+py-modules = []
