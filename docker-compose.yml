@@ -136,7 +136,6 @@ services:
       TZ: Europe/Moscow
       <<: *strip-proxy-env
       FIRECRAWL_BASE_URL: "${PARSER_FIRECRAWL_BASE_URL:-http://host.docker.internal:3002}"
-      DATABASE_URL: "postgresql+asyncpg://flipper:${POSTGRES_PASSWORD:-flipper_secret}@app_postgres:5432/flipper"
     volumes:
       - ${FLIPPER_CREDENTIALS_SOURCE:-./credentials.json}:/app/credentials.json
       - ${FLIPPER_DATA_SOURCE:-./data}:/app/data
@@ -164,7 +163,6 @@ services:
     environment:
       TZ: Europe/Moscow
       <<: *strip-proxy-env
-      DATABASE_URL: "postgresql+asyncpg://flipper:${POSTGRES_PASSWORD:-flipper_secret}@app_postgres:5432/flipper"
     volumes:
       - ${FLIPPER_DATA_SOURCE:-./data}:/app/data
     depends_on:
@@ -186,7 +184,6 @@ services:
     environment:
       TZ: Europe/Moscow
       <<: *strip-proxy-env
-      DATABASE_URL: "postgresql+asyncpg://flipper:${POSTGRES_PASSWORD:-flipper_secret}@app_postgres:5432/flipper"
     volumes:
       - ${FLIPPER_DATA_SOURCE:-./data}:/app/data
     depends_on:
@@ -208,7 +205,6 @@ services:
     environment:
       TZ: Europe/Moscow
       <<: *strip-proxy-env
-      DATABASE_URL: "postgresql+asyncpg://flipper:${POSTGRES_PASSWORD:-flipper_secret}@app_postgres:5432/flipper"
     volumes:
       - ${FLIPPER_DATA_SOURCE:-./data}:/app/data
     depends_on:
@@ -230,7 +226,6 @@ services:
     environment:
       TZ: Europe/Moscow
       <<: *strip-proxy-env
-      DATABASE_URL: "postgresql+asyncpg://flipper:${POSTGRES_PASSWORD:-flipper_secret}@app_postgres:5432/flipper"
     volumes:
       - ${FLIPPER_DATA_SOURCE:-./data}:/app/data
     depends_on:
@@ -280,7 +275,6 @@ services:
       PYTHONPATH: /app
       <<: *strip-proxy-env
       FIRECRAWL_BASE_URL: "${PARSER_FIRECRAWL_BASE_URL:-http://host.docker.internal:3002}"
-      DATABASE_URL: "postgresql+asyncpg://flipper:${POSTGRES_PASSWORD:-flipper_secret}@app_postgres:5432/flipper"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -301,9 +295,7 @@ services:
   # Для dev-режима с hot-reload: `docker compose --profile dev up -d api`
   # (использует services/api/Dockerfile.dev с volume-монтированием).
   #
-  # DATABASE_URL: внутри compose-сети бьём на app_postgres:5432. Из-под
-  # Windows-нативного dev (без Docker) можно поменять на 127.0.0.1:5432
-  # через переменную в .env (DATABASE_URL=...).
+  # DATABASE_URL берётся из .env (единый для всех сервисов → app_postgres:5432).
   api:
     image: flipper-api
     build:
@@ -316,16 +308,11 @@ services:
     environment:
       TZ: Europe/Moscow
       PYTHONPATH: /app
-      # Single source of truth: Windows-native PostgreSQL 18.1 на хосте
-      # (127.0.0.1:5432) — туда стекаются миграция, reparse, live api.
-      # Из контейнера это host.docker.internal:5432. app_postgres ниже
-      # НЕ обязателен (зависимость снята), но оставлен в compose для
-      # случая "полностью изолированный dev в Docker без хоста".
-      DATABASE_URL: "postgresql+asyncpg://flipper:${POSTGRES_PASSWORD:-flipper_secret}@host.docker.internal:5432/flipper"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     ports:
       - "8001:8000"   # host 8001 → container 8000 (host 8000 занят cookie_manager)
+    depends_on:
+      app_postgres:
+        condition: service_healthy
     networks:
       - flipper_network
     healthcheck:
@@ -348,11 +335,11 @@ services:
     environment:
       TZ: Europe/Moscow
       PYTHONPATH: /app
-      DATABASE_URL: "postgresql+asyncpg://flipper:${POSTGRES_PASSWORD:-flipper_secret}@host.docker.internal:5432/flipper"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     ports:
       - "8001:8000"
+    depends_on:
+      app_postgres:
+        condition: service_healthy
     volumes:
       # Live code — uvicorn --reload увидит правки мгновенно.
       - ./web:/app/web
