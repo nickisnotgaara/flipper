@@ -1,0 +1,15 @@
+# API (web/server.py) — minimal requirements.
+# Server is FastAPI + asyncpg + httpx; everything else (parsing, etc.)
+# lives in other services and isn't imported here.
+#
+# numpy + scipy are pulled in by packages/flipper_db.linker (cKDTree for
+# geo fallback). linker is eagerly imported via packages/flipper_db/__init__.py,
+# so we have to have it at server startup. If we ever want a leaner api image,
+# lazy-import the linker in __init__.py — but for now this is simpler.
+fastapi>=0.110
+uvicorn[standard]>=0.27
+sqlalchemy[asyncio]>=2.0
+asyncpg>=0.29
+httpx>=0.26
+numpy>=1.26
+scipy>=1.11

@@ -48,6 +48,37 @@ services/cookie_manager/cookies.json
 *.log
 *.sqlite3
 *.db
+*.dump
+
+# Data dir (runtime data, debug scripts, dumps — всё генерируется локально)
+data/
+!data/.gitkeep
+# N.B.: data/proxies.txt уже tracked — оставляем (нужен для парсеров).
+# Если хотим убрать — `git rm --cached data/proxies.txt`.
+
+# Secrets / credentials dir
+secrets/
+
+# Debug / temporary scripts (временные дебаг-файлы)
+_tmp_*.py
+scripts/_tmp/
+scripts/_*.py
+scripts/_*.sql
+scripts/_*.ps1
+data/_*.py
+data/_*.json
+data/_*.dump
+
+# Archive (legacy code, переносим осознанно в Фазе 3)
+archive/
+
+# Next.js build artifacts
+web/next/node_modules/
+web/next/.next/
+web/next/out/
+web/next/tsconfig.tsbuildinfo
+web/next/page-bundle.js
+web/next/.env.local
 
 # OS generated files
 .DS_Store
@@ -65,8 +96,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/

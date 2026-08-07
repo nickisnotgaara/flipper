@@ -1,5 +1,30 @@
-# Обнуляем proxy-переменные из .env для сервисов, которым прокси не нужен.
-# cookie_manager получает .env как есть (env_file) — ему прокси могут быть нужны.
+# Flipper — Единая система парсинга недвижимости.
+#
+# Сервисы:
+#   Infrastructure: app_postgres, app_redis, html_to_markdown, cookie_manager
+#   Parsers (manual): cian_active, cian_sold, winners_sold, domclick_sold, flatinfo_houses
+#                     category_counter, pipeline_runner
+#   Always-on:       api (FastAPI prod), scheduler (cron-подобный)
+#
+# Фронтенд (Next.js) намеренно вынесен из compose.
+#   - Собирается отдельно: web/next/ → `npm run build` → статика в ./out
+#   - Деплоится на Vercel / Cloudflare Pages / nginx / S3+CDN
+#   - При правке фронта Docker-стек не перезапускается
+#   - Подробности: web/next/README.md
+#
+# Запуск:
+#   docker compose up -d                                 # инфраструктура + scheduler + api
+#   docker compose run --rm cian_active                  # ручной запуск парсера
+#   docker compose run --rm cian_sold                    # ручной
+#   docker compose run --rm winners_sold                 # ручной
+#   docker compose run --rm domclick_sold                # ручной
+#   docker compose run --rm flatinfo_houses              # ручной
+#   docker compose run --rm pipeline_runner              # ручной запуск pipeline
+#
+# Dev-режим для API (uvicorn --reload, монтирование исходников):
+#   docker compose --profile dev up -d api
+#   # web/next при этом запускается локально: cd web/next && npm run dev
+
 x-strip-proxy-env: &strip-proxy-env
   HTTP_PROXY: ""
   HTTPS_PROXY: ""
@@ -9,6 +34,42 @@ x-strip-proxy-env: &strip-proxy-env
   all_proxy: ""
 
 services:
+  # ============================================================ Infrastructure
+
+  app_postgres:
+    image: postgres:16-alpine
+    container_name: app_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: flipper
+      POSTGRES_USER: flipper
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-flipper_secret}"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - flipper_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flipper"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app_redis:
+    image: redis:alpine
+    container_name: app_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - flipper_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
   html_to_markdown:
     image: flipper-html_to_markdown
     build:
@@ -47,8 +108,6 @@ services:
     volumes:
       - ${FLIPPER_COOKIES_SOURCE:-./services/cookie_manager/cookies.json}:/app/cookies.json
       - ${FLIPPER_ACCOUNTS_SOURCE:-./services/cookie_manager/accounts.json}:/app/accounts.json
-      # Прокси для авто-логина (тот же файл, что использует parser_cian).
-      # ro — конфиг, контейнер не должен его менять.
       - ${FLIPPER_DATA_SOURCE:-./data}:/app/data:ro
     depends_on:
       - app_redis
@@ -56,43 +115,19 @@ services:
       - flipper_network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      # /health отдаёт 503 пока нет DMIR_AUTH (на старте идёт авто-логин:
-      # warm-up + is-email-registered + validate-login + logon × несколько
-      # аккаунтов с задержками 6-10s между ними). Поэтому даём щедрый
-      # start_period: пока он не истёк, провалившийся healthcheck НЕ
-      # помечает контейнер как unhealthy. interval 5s — чтобы parser_cian
-      # стартовал сразу после первого успешного логина.
       interval: 5s
       timeout: 10s
       retries: 5
       start_period: 180s
 
-  app_postgres:
-    image: postgres:16-alpine
-    container_name: app_postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: flipper
-      POSTGRES_USER: flipper
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-flipper_secret}"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    networks:
-      - flipper_network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U flipper"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+  # ============================================================ Parsers (manual)
 
-  parser_cian:
-    image: flipper-parser_cian
+  cian_active:
+    image: flipper-cian_active
     build:
       context: .
-      dockerfile: ./services/parser_cian/Dockerfile
-    container_name: parser_cian
+      dockerfile: ./services/parsers/cian_active/Dockerfile
+    container_name: cian_active
     env_file:
       - .env
     extra_hosts:
@@ -115,6 +150,94 @@ services:
     networks:
       - flipper_network
       - firecrawl_backend
+    profiles:
+      - manual
+
+  cian_sold:
+    image: flipper-cian_sold
+    build:
+      context: .
+      dockerfile: ./services/parsers/cian_sold/Dockerfile
+    container_name: cian_sold
+    env_file:
+      - .env
+    environment:
+      TZ: Europe/Moscow
+      <<: *strip-proxy-env
+      DATABASE_URL: "postgresql+asyncpg://flipper:${POSTGRES_PASSWORD:-flipper_secret}@app_postgres:5432/flipper"
+    volumes:
+      - ${FLIPPER_DATA_SOURCE:-./data}:/app/data
+    depends_on:
+      app_postgres:
+        condition: service_healthy
+    networks:
+      - flipper_network
+    profiles:
+      - manual
+
+  winners_sold:
+    image: flipper-winners_sold
+    build:
+      context: .
+      dockerfile: ./services/parsers/winners_sold/Dockerfile
+    container_name: winners_sold
+    env_file:
+      - .env
+    environment:
+      TZ: Europe/Moscow
+      <<: *strip-proxy-env
+      DATABASE_URL: "postgresql+asyncpg://flipper:${POSTGRES_PASSWORD:-flipper_secret}@app_postgres:5432/flipper"
+    volumes:
+      - ${FLIPPER_DATA_SOURCE:-./data}:/app/data
+    depends_on:
+      app_postgres:
+        condition: service_healthy
+    networks:
+      - flipper_network
+    profiles:
+      - manual
+
+  domclick_sold:
+    image: flipper-domclick_sold
+    build:
+      context: .
+      dockerfile: ./services/parsers/domclick_sold/Dockerfile
+    container_name: domclick_sold
+    env_file:
+      - .env
+    environment:
+      TZ: Europe/Moscow
+      <<: *strip-proxy-env
+      DATABASE_URL: "postgresql+asyncpg://flipper:${POSTGRES_PASSWORD:-flipper_secret}@app_postgres:5432/flipper"
+    volumes:
+      - ${FLIPPER_DATA_SOURCE:-./data}:/app/data
+    depends_on:
+      app_postgres:
+        condition: service_healthy
+    networks:
+      - flipper_network
+    profiles:
+      - manual
+
+  flatinfo_houses:
+    image: flipper-flatinfo_houses
+    build:
+      context: .
+      dockerfile: ./services/parsers/flatinfo_houses/Dockerfile
+    container_name: flatinfo_houses
+    env_file:
+      - .env
+    environment:
+      TZ: Europe/Moscow
+      <<: *strip-proxy-env
+      DATABASE_URL: "postgresql+asyncpg://flipper:${POSTGRES_PASSWORD:-flipper_secret}@app_postgres:5432/flipper"
+    volumes:
+      - ${FLIPPER_DATA_SOURCE:-./data}:/app/data
+    depends_on:
+      app_postgres:
+        condition: service_healthy
+    networks:
+      - flipper_network
     profiles:
       - manual
 
@@ -141,6 +264,105 @@ services:
     profiles:
       - manual
 
+  # Pipeline runner: ежедневный "fetch-missing" всех активных объявлений
+  # cian_active. Запускается scheduler'ом через `docker compose run --rm pipeline_runner`
+  # в 02:00 MSK. По сути — обёртка вокруг scripts/run_pipeline.py.
+  pipeline_runner:
+    image: flipper-pipeline_runner
+    build:
+      context: .
+      dockerfile: ./services/pipeline_runner/Dockerfile
+    container_name: pipeline_runner
+    env_file:
+      - .env
+    environment:
+      TZ: Europe/Moscow
+      PYTHONPATH: /app
+      <<: *strip-proxy-env
+      FIRECRAWL_BASE_URL: "${PARSER_FIRECRAWL_BASE_URL:-http://host.docker.internal:3002}"
+      DATABASE_URL: "postgresql+asyncpg://flipper:${POSTGRES_PASSWORD:-flipper_secret}@app_postgres:5432/flipper"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${FLIPPER_DATA_SOURCE:-./data}:/app/data
+    depends_on:
+      app_postgres:
+        condition: service_healthy
+    networks:
+      - flipper_network
+    profiles:
+      - manual
+
+  # ============================================================ Always-on
+
+  # FastAPI backend (web/server.py).
+  #
+  # Прод-режим по умолчанию: gunicorn + uvicorn workers, без --reload.
+  # Для dev-режима с hot-reload: `docker compose --profile dev up -d api`
+  # (использует services/api/Dockerfile.dev с volume-монтированием).
+  #
+  # DATABASE_URL: внутри compose-сети бьём на app_postgres:5432. Из-под
+  # Windows-нативного dev (без Docker) можно поменять на 127.0.0.1:5432
+  # через переменную в .env (DATABASE_URL=...).
+  api:
+    image: flipper-api
+    build:
+      context: .
+      dockerfile: ./services/api/Dockerfile
+    container_name: flipper_api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TZ: Europe/Moscow
+      PYTHONPATH: /app
+      # Single source of truth: Windows-native PostgreSQL 18.1 на хосте
+      # (127.0.0.1:5432) — туда стекаются миграция, reparse, live api.
+      # Из контейнера это host.docker.internal:5432. app_postgres ниже
+      # НЕ обязателен (зависимость снята), но оставлен в compose для
+      # случая "полностью изолированный dev в Docker без хоста".
+      DATABASE_URL: "postgresql+asyncpg://flipper:${POSTGRES_PASSWORD:-flipper_secret}@host.docker.internal:5432/flipper"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8001:8000"   # host 8001 → container 8000 (host 8000 занят cookie_manager)
+    networks:
+      - flipper_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/stats"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Dev-вариант api: uvicorn --reload + volume-монтирование исходников.
+  # Поднимается отдельно через `--profile dev`, чтобы не мешать прод-стэку.
+  api-dev:
+    image: flipper-api
+    build:
+      context: .
+      dockerfile: ./services/api/Dockerfile.dev
+    container_name: flipper_api_dev
+    env_file:
+      - .env
+    environment:
+      TZ: Europe/Moscow
+      PYTHONPATH: /app
+      DATABASE_URL: "postgresql+asyncpg://flipper:${POSTGRES_PASSWORD:-flipper_secret}@host.docker.internal:5432/flipper"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8001:8000"
+    volumes:
+      # Live code — uvicorn --reload увидит правки мгновенно.
+      - ./web:/app/web
+      - ./packages:/app/packages
+      - ./services:/app/services
+    networks:
+      - flipper_network
+    profiles:
+      - dev
+
   scheduler:
     image: flipper-scheduler
     build:
@@ -153,12 +375,9 @@ services:
     environment:
       TZ: Europe/Moscow
       <<: *strip-proxy-env
-      # Имя контейнера для docker inspect (корень репо на хосте → FLIPPER_* в шедулере)
       SCHEDULER_CONTAINER_NAME: flipper_scheduler
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      # Корень репозитория в /app: шедулер через inspect берёт Source этого mount и подставляет
-      # FLIPPER_CREDENTIALS_SOURCE / FLIPPER_DATA_SOURCE в compose run (иначе бинды указывают в /app на демоне).
       - .:/app
       - ./data:/app/data
     depends_on:
@@ -170,20 +389,6 @@ services:
         condition: service_healthy
     networks:
       - flipper_network
-
-  app_redis:
-    image: redis:alpine
-    container_name: app_redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    networks:
-      - flipper_network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
 
 networks:
   flipper_network:

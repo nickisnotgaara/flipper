@@ -1,249 +1,456 @@
+"""scripts/migrate_sqlite_to_postgres - перенос данных из SQLite (secondary_migrated.db)
+в новую PostgreSQL-схему (houses, active_ads, sold_ads).
+
+NB: при импорте даты/числа из SQLite приходят как строки (TEXT) — конвертируем
+в Python-типы (date, int, float, bool) перед передачей в SQLAlchemy.
+
+Зачем: secondary_migrated.db (2.8 GB) — это результат предыдущей миграции
+secondary/* в SQLite (от 2026-07-25). Чтобы быстро получить данные в PostgreSQL,
+переливаем SQLite → PostgreSQL напрямую.
+
+Это НЕ замена полной миграции из secondary/:
+    scripts/migrate_secondary_files_to_postgres.py
+которая читает оригинальные JSONL/JSON файлы из secondary/.
+Здесь мы идём по короткому пути: SQLite уже содержит всё, что есть в JSONL.
+
+Идемпотентен: upsert по (source, external_*_id). Повторный запуск безопасен.
+
+Использование:
+    # Перелить secondary_migrated.db (default) в PostgreSQL (default)
+    py scripts/migrate_sqlite_to_postgres.py
+
+    # С параметрами
+    py scripts/migrate_sqlite_to_postgres.py \\
+        --sqlite data/secondary_migrated.db \\
+        --db "postgresql+asyncpg://flipper:flipper_secret@127.0.0.1:5432/flipper" \\
+        --batch-size 1000
 """
-Миграция данных из SQLite (data/parser_cian.db) в PostgreSQL.
 
-Запускать ОДИН раз при деплое. PostgreSQL должен быть уже запущен.
-
-Использование внутри контейнера parser_cian:
-  docker compose run --rm parser_cian python scripts/migrate_sqlite_to_postgres.py
-
-Или с хоста (если установлены зависимости):
-  python scripts/migrate_sqlite_to_postgres.py \
-      --sqlite data/parser_cian.db \
-      --pg "postgresql+asyncpg://flipper:flipper_secret@localhost:5432/flipper"
-"""
+from __future__ import annotations
 
 import argparse
 import asyncio
 import json
 import logging
+import os
 import sqlite3
 import sys
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
+from typing import Any, Iterable
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 
-from sqlalchemy import text
-from services.parser_cian.db import base as db_base
+from packages.flipper_db import (
+    ActiveAd,
+    FlipperRepository,
+    House,
+    SoldAd,
+    init_db,
+    init_engine,
+)
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger("migrate")
-
-DEFAULT_SQLITE = "data/parser_cian.db"
-DEFAULT_PG = "postgresql+asyncpg://flipper:flipper_secret@app_postgres:5432/flipper"
+logger = logging.getLogger("migrate_sqlite_to_pg")
 
 
-def _parse_ts(value):
-    if not value:
+# ===================================================================== schema
+
+# Словарь: имя таблицы в SQLite → список колонок для чтения.
+# Эти колонки = поля вторичных парсеров, плюс служебные (id, parsed_at и т.д.).
+#
+# NB: SQLAlchemy-модели не читаем напрямую из dict (не загружаем в ORM),
+# а читаем из SQLite как dict и затем вручную конвертируем в ActiveAd/House/SoldAd
+# — это безопасно по типам и проще по обработке ошибок.
+
+_HOUSE_COLS = [
+    "source", "external_house_id", "cian_house_id", "address",
+    "street", "house_num", "district", "okrug", "lat", "lng",
+    "year_built", "levels", "building_type", "series", "ceiling_height",
+    "package", "raw_data", "parsed_at", "updated_at",
+]
+
+_ACTIVE_COLS = [
+    "source", "cian_id", "url", "house_id", "cian_house_id",
+    "price", "price_per_m2", "area", "rooms", "floor_current", "floor_total",
+    "metro_station", "metro_walk_time", "district", "okrug", "renovation",
+    "is_active", "days_in_exposition", "total_views", "unique_views",
+    "publish_date", "price_history", "raw_data", "parsed_at", "updated_at",
+    "filter_id",
+]
+
+_SOLD_COLS = [
+    "source", "external_id", "url", "house_id", "cian_house_id",
+    "price", "price_per_m2", "area", "rooms", "floor_current", "floor_total",
+    "renovation", "exposition_days", "publish_date", "sold_date",
+    "raw_data", "parsed_at",
+]
+
+
+# ===================================================================== helpers
+
+
+def _coerce_value(v: Any) -> Any:
+    """SQLite возвращает всё в виде str/int/None/bytes.
+
+    Преобразуем в Python-типы, подходящие для SQLAlchemy:
+      - bytes → str (json/jsonb хранится как str)
+      - None → None
+    """
+    if v is None:
         return None
-    if isinstance(value, datetime):
-        return value
-    s = str(value).strip()
+    if isinstance(v, (bytes, bytearray)):
+        try:
+            return v.decode("utf-8")
+        except UnicodeDecodeError:
+            return v.decode("utf-8", errors="replace")
+    return v
+
+
+def _parse_date(v: Any) -> date | None:
+    """SQLite хранит DATE как 'YYYY-MM-DD' (TEXT). Парсим в date."""
+    if v is None:
+        return None
+    if isinstance(v, date):
+        return v
+    if isinstance(v, datetime):
+        return v.date()
+    s = str(v).strip()
+    if not s:
+        return None
+    # ISO date (YYYY-MM-DD)
+    try:
+        return datetime.strptime(s[:10], "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_int(v: Any) -> int | None:
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return int(v)
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float):
+        return int(v) if v.is_integer() else None
+    s = str(v).strip()
     if not s:
         return None
     try:
-        # Works for 'YYYY-MM-DD HH:MM:SS' and ISO-like timestamps.
-        return datetime.fromisoformat(s.replace("Z", "+00:00"))
-    except ValueError:
+        return int(s)
+    except (ValueError, TypeError):
+        try:
+            return int(float(s))
+        except (ValueError, TypeError):
+            return None
+
+
+def _parse_float(v: Any) -> float | None:
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return float(v)
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).strip().replace(",", ".")
+    if not s:
+        return None
+    try:
+        return float(s)
+    except (ValueError, TypeError):
         return None
 
 
-def read_sqlite(db_path: str) -> dict:
-    """Read all data from SQLite into memory."""
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-
-    tables = [r[0] for r in conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-    ).fetchall()]
-    logger.info("SQLite tables: %s", tables)
-
-    data = {}
-
-    if "cian_filters" in tables:
-        rows = conn.execute("SELECT id, url, meta FROM cian_filters").fetchall()
-        filters = []
-        for r in rows:
-            meta = r["meta"]
-            if isinstance(meta, str):
-                try:
-                    meta = json.loads(meta)
-                except (json.JSONDecodeError, TypeError):
-                    pass
-            filters.append({"id": r["id"], "url": r["url"], "meta": meta})
-        data["cian_filters"] = filters
-        logger.info("cian_filters: %d rows", len(filters))
-
-    if "cian_active_ads" in tables:
-        rows = conn.execute(
-            "SELECT id, url, filter_id, source, parsed_data, is_parsed, "
-            "last_updated, added_at FROM cian_active_ads"
-        ).fetchall()
-        ads = []
-        for r in rows:
-            pd = r["parsed_data"]
-            if isinstance(pd, (str, bytes)):
-                try:
-                    pd = json.loads(pd)
-                except (json.JSONDecodeError, TypeError):
-                    pd = None
-            ads.append({
-                "id": r["id"],
-                "url": r["url"],
-                "filter_id": r["filter_id"],
-                "source": r["source"] or "offers",
-                "parsed_data": pd,
-                "is_parsed": bool(r["is_parsed"]),
-                "last_updated": r["last_updated"],
-                "added_at": r["added_at"],
-            })
-        data["cian_active_ads"] = ads
-        logger.info("cian_active_ads: %d rows", len(ads))
-
-    if "cian_sold_ads" in tables:
-        rows = conn.execute(
-            "SELECT id, url, parsed_data, publish_date, sold_at FROM cian_sold_ads"
-        ).fetchall()
-        sold = []
-        for r in rows:
-            pd = r["parsed_data"]
-            if isinstance(pd, (str, bytes)):
-                try:
-                    pd = json.loads(pd)
-                except (json.JSONDecodeError, TypeError):
-                    pd = None
-            sold.append({
-                "id": r["id"],
-                "url": r["url"],
-                "parsed_data": pd,
-                "publish_date": r["publish_date"],
-                "sold_at": r["sold_at"],
-            })
-        data["cian_sold_ads"] = sold
-        logger.info("cian_sold_ads: %d rows", len(sold))
-
-    conn.close()
-    return data
+def _parse_bool(v: Any) -> bool | None:
+    """SQLite хранит bool как 0/1 (INTEGER)."""
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return bool(v)
+    s = str(v).strip().lower()
+    if s in ("1", "true", "t", "yes", "y"):
+        return True
+    if s in ("0", "false", "f", "no", "n", ""):
+        return False
+    return None
 
 
-async def write_postgres(pg_url: str, data: dict) -> None:
-    """Write data to PostgreSQL, creating tables first."""
-    await db_base.init_db(pg_url)
-    if db_base.AsyncSessionLocal is None:
-        raise RuntimeError("AsyncSessionLocal is not initialized after init_db()")
-
-    async with db_base.AsyncSessionLocal() as session:
-        # Check if target tables already have data
-        for table in ("cian_filters", "cian_active_ads", "cian_sold_ads"):
-            result = await session.execute(text(f"SELECT COUNT(*) FROM {table}"))
-            count = result.scalar()
-            if count > 0:
-                logger.warning("Table %s already has %d rows — will skip duplicates (ON CONFLICT)", table, count)
-
-    # --- cian_filters ---
-    filters = data.get("cian_filters", [])
-    if filters:
-        async with db_base.AsyncSessionLocal() as session:
-            for f in filters:
-                await session.execute(text(
-                    "INSERT INTO cian_filters (id, url, meta) "
-                    "VALUES (:id, :url, CAST(:meta AS jsonb)) "
-                    "ON CONFLICT (url) DO NOTHING"
-                ), {"id": f["id"], "url": f["url"], "meta": json.dumps(f["meta"]) if f["meta"] else None})
-            await session.commit()
-
-            # Reset sequence to max id
-            await session.execute(text(
-                "SELECT setval('cian_filters_id_seq', COALESCE((SELECT MAX(id) FROM cian_filters), 1))"
-            ))
-            await session.commit()
-        logger.info("Inserted cian_filters: %d", len(filters))
-
-    # --- cian_active_ads ---
-    ads = data.get("cian_active_ads", [])
-    if ads:
-        chunk_size = 200
-        inserted = 0
-        async with db_base.AsyncSessionLocal() as session:
-            for i in range(0, len(ads), chunk_size):
-                chunk = ads[i:i + chunk_size]
-                for ad in chunk:
-                    await session.execute(text(
-                        "INSERT INTO cian_active_ads "
-                        "(id, url, filter_id, source, parsed_data, is_parsed, last_updated, added_at) "
-                        "VALUES (:id, :url, :filter_id, :source, CAST(:parsed_data AS jsonb), :is_parsed, "
-                        ":last_updated, :added_at) "
-                        "ON CONFLICT (url) DO NOTHING"
-                    ), {
-                        "id": ad["id"],
-                        "url": ad["url"],
-                        "filter_id": ad["filter_id"],
-                        "source": ad["source"],
-                        "parsed_data": json.dumps(ad["parsed_data"]) if ad["parsed_data"] else None,
-                        "is_parsed": ad["is_parsed"],
-                        "last_updated": _parse_ts(ad["last_updated"]) or datetime.now(),
-                        "added_at": _parse_ts(ad["added_at"]) or datetime.now(),
-                    })
-                    inserted += 1
-                await session.commit()
-                logger.info("cian_active_ads: %d / %d", min(i + chunk_size, len(ads)), len(ads))
-
-            await session.execute(text(
-                "SELECT setval('cian_active_ads_id_seq', COALESCE((SELECT MAX(id) FROM cian_active_ads), 1))"
-            ))
-            await session.commit()
-        logger.info("Inserted cian_active_ads: %d", inserted)
-
-    # --- cian_sold_ads ---
-    sold = data.get("cian_sold_ads", [])
-    if sold:
-        async with db_base.AsyncSessionLocal() as session:
-            for s in sold:
-                await session.execute(text(
-                    "INSERT INTO cian_sold_ads (id, url, parsed_data, publish_date, sold_at) "
-                    "VALUES (:id, :url, CAST(:parsed_data AS jsonb), :publish_date, :sold_at) "
-                    "ON CONFLICT (url) DO NOTHING"
-                ), {
-                    "id": s["id"],
-                    "url": s["url"],
-                    "parsed_data": json.dumps(s["parsed_data"]) if s["parsed_data"] else None,
-                    "publish_date": s["publish_date"],
-                    "sold_at": _parse_ts(s["sold_at"]) or datetime.now(),
-                })
-            await session.commit()
-
-            await session.execute(text(
-                "SELECT setval('cian_sold_ads_id_seq', COALESCE((SELECT MAX(id) FROM cian_sold_ads), 1))"
-            ))
-            await session.commit()
-        logger.info("Inserted cian_sold_ads: %d", len(sold))
+def _row_to_dict(cursor, row) -> dict[str, Any]:
+    return {col[0]: _coerce_value(val) for col, val in zip(cursor.description, row)}
 
 
-async def main(args):
-    sqlite_path = args.sqlite
-    pg_url = args.pg
+def _iter_sqlite(sqlite_path: Path, table: str, batch: int) -> Iterable[list[dict]]:
+    """Итератор по SQLite-таблице, yield'ит батчи dict'ов."""
+    conn = sqlite3.connect(str(sqlite_path))
+    # row_factory = sqlite3.Row, но мы читаем через cursor для скорости
+    cursor = conn.cursor()
+    try:
+        cursor.execute(f"SELECT COUNT(*) FROM {table};")
+        total = cursor.fetchone()[0]
+        logger.info("SQLite %s: %d строк", table, total)
 
-    if not Path(sqlite_path).exists():
-        logger.error("SQLite file not found: %s", sqlite_path)
-        sys.exit(1)
+        offset = 0
+        while offset < total:
+            cursor.execute(f"SELECT * FROM {table} LIMIT ? OFFSET ?;", (batch, offset))
+            rows = cursor.fetchall()
+            if not rows:
+                break
+            batch_dicts = [_row_to_dict(cursor, r) for r in rows]
+            yield batch_dicts
+            offset += batch
+    finally:
+        cursor.close()
+        conn.close()
 
-    logger.info("=== Migration: SQLite -> PostgreSQL ===")
-    logger.info("SQLite: %s", sqlite_path)
-    logger.info("PostgreSQL: %s", pg_url.split("@")[-1])
 
-    data = read_sqlite(sqlite_path)
+# ===================================================================== conversion
 
-    total = sum(len(v) for v in data.values())
-    if total == 0:
-        logger.warning("SQLite database is empty — nothing to migrate")
-        return
 
-    await write_postgres(pg_url, data)
-    logger.info("=== Migration complete: %d total rows ===", total)
+def _parse_json_if_str(v: Any) -> Any:
+    """Если v — строка, пытаемся распарсить как JSON. Иначе вернуть как есть."""
+    if v is None:
+        return None
+    if isinstance(v, (dict, list)):
+        return v
+    if isinstance(v, (bytes, bytearray)):
+        try:
+            v = v.decode("utf-8")
+        except Exception:
+            return None
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return None
+        try:
+            return json.loads(s)
+        except (ValueError, TypeError):
+            # Если не JSON, вернуть как строку (для raw_data иногда строка не-JSON)
+            return v
+    return v
+
+
+def _to_house(rec: dict[str, Any]) -> House | None:
+    """dict из SQLite → House. None если source/external_house_id пустые."""
+    src = rec.get("source")
+    eid = rec.get("external_house_id")
+    if not src or eid is None:
+        return None
+
+    return House(
+        source=str(src),
+        external_house_id=str(eid),
+        cian_house_id=_parse_int(rec.get("cian_house_id")),
+        address=rec.get("address"),
+        street=rec.get("street"),
+        house_num=rec.get("house_num"),
+        district=rec.get("district"),
+        okrug=rec.get("okrug"),
+        lat=_parse_float(rec.get("lat")),
+        lng=_parse_float(rec.get("lng")),
+        year_built=_parse_int(rec.get("year_built")),
+        levels=_parse_int(rec.get("levels")),
+        building_type=rec.get("building_type"),
+        series=rec.get("series"),
+        ceiling_height=_parse_float(rec.get("ceiling_height")),
+        package=rec.get("package"),
+        raw_data=_parse_json_if_str(rec.get("raw_data")),
+    )
+
+
+def _to_active(rec: dict[str, Any]) -> ActiveAd | None:
+    src = rec.get("source")
+    cid = rec.get("cian_id")
+    if not src or not cid:
+        return None
+    is_act = rec.get("is_active")
+    if is_act is None:
+        is_act = True
+    return ActiveAd(
+        source=str(src),
+        cian_id=str(cid),
+        url=rec.get("url"),
+        house_id=_parse_int(rec.get("house_id")),
+        cian_house_id=_parse_int(rec.get("cian_house_id")),
+        price=_parse_int(rec.get("price")),
+        price_per_m2=_parse_int(rec.get("price_per_m2")),
+        area=_parse_float(rec.get("area")),
+        rooms=_parse_int(rec.get("rooms")),
+        floor_current=_parse_int(rec.get("floor_current")),
+        floor_total=_parse_int(rec.get("floor_total")),
+        metro_station=rec.get("metro_station"),
+        metro_walk_time=_parse_int(rec.get("metro_walk_time")),
+        district=rec.get("district"),
+        okrug=rec.get("okrug"),
+        renovation=rec.get("renovation"),
+        is_active=_parse_bool(is_act) if not isinstance(is_act, bool) else is_act,
+        days_in_exposition=_parse_int(rec.get("days_in_exposition")),
+        total_views=_parse_int(rec.get("total_views")),
+        unique_views=_parse_int(rec.get("unique_views")),
+        publish_date=_parse_date(rec.get("publish_date")),
+        filter_id=_parse_int(rec.get("filter_id")),
+        price_history=_parse_json_if_str(rec.get("price_history")),
+        raw_data=_parse_json_if_str(rec.get("raw_data")),
+    )
+
+
+def _to_sold(rec: dict[str, Any]) -> SoldAd | None:
+    src = rec.get("source")
+    eid = rec.get("external_id")
+    if not src or eid is None:
+        return None
+    return SoldAd(
+        source=str(src),
+        external_id=str(eid),
+        url=rec.get("url"),
+        house_id=_parse_int(rec.get("house_id")),
+        cian_house_id=_parse_int(rec.get("cian_house_id")),
+        price=_parse_int(rec.get("price")),
+        price_per_m2=_parse_int(rec.get("price_per_m2")),
+        area=_parse_float(rec.get("area")),
+        rooms=_parse_int(rec.get("rooms")),
+        floor_current=_parse_int(rec.get("floor_current")),
+        floor_total=_parse_int(rec.get("floor_total")),
+        renovation=rec.get("renovation"),
+        exposition_days=_parse_int(rec.get("exposition_days")),
+        publish_date=_parse_date(rec.get("publish_date")),
+        sold_date=_parse_date(rec.get("sold_date")),
+        raw_data=_parse_json_if_str(rec.get("raw_data")),
+    )
+
+
+# ===================================================================== main
+
+
+async def run(
+    sqlite_path: Path,
+    db_url: str,
+    batch_size: int = 500,
+    dry_run: bool = False,
+) -> int:
+    if not sqlite_path.is_file():
+        logger.error("SQLite не найден: %s", sqlite_path)
+        return 2
+
+    logger.info("=" * 60)
+    logger.info("SQLite → PostgreSQL миграция")
+    logger.info("=" * 60)
+    logger.info("SQLite:  %s (%.1f MB)", sqlite_path, sqlite_path.stat().st_size / 1024 / 1024)
+    logger.info("DB URL:  %s", db_url.split("@")[-1])
+    logger.info("Batch:   %d", batch_size)
+    logger.info("Dry run: %s", dry_run)
+
+    if dry_run:
+        # Просто посчитаем, без миграции
+        conn = sqlite3.connect(str(sqlite_path))
+        try:
+            for t in ("houses", "active_ads", "sold_ads"):
+                n = conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+                logger.info("[DRY-RUN] %s: %d строк будет перенесено", t, n)
+        finally:
+            conn.close()
+        return 0
+
+    # init engine + создать таблицы (если их нет)
+    init_engine(db_url)
+    await init_db(db_url)
+    repo = FlipperRepository()
+
+    # houses
+    logger.info("=" * 60)
+    logger.info("=== houses ===")
+    total_h = 0
+    n_batches = 0
+    for batch in _iter_sqlite(sqlite_path, "houses", batch_size):
+        objs = [_to_house(r) for r in batch]
+        objs = [o for o in objs if o is not None]
+        n = await repo.upsert_houses_batch(objs)
+        total_h += n
+        n_batches += 1
+        if n_batches % 10 == 0:
+            logger.info("houses: %d батчей, %d записей (running)", n_batches, total_h)
+    logger.info("houses: итого %d записей", total_h)
+
+    # active_ads
+    logger.info("=" * 60)
+    logger.info("=== active_ads ===")
+    total_a = 0
+    n_batches = 0
+    for batch in _iter_sqlite(sqlite_path, "active_ads", batch_size):
+        objs = [_to_active(r) for r in batch]
+        objs = [o for o in objs if o is not None]
+        n = await repo.upsert_active_ads_batch(objs)
+        total_a += n
+        n_batches += 1
+        if n_batches % 5 == 0:
+            logger.info("active_ads: %d батчей, %d записей (running)", n_batches, total_a)
+    logger.info("active_ads: итого %d записей", total_a)
+
+    # sold_ads
+    logger.info("=" * 60)
+    logger.info("=== sold_ads ===")
+    total_s = 0
+    n_batches = 0
+    for batch in _iter_sqlite(sqlite_path, "sold_ads", batch_size):
+        objs = [_to_sold(r) for r in batch]
+        objs = [o for o in objs if o is not None]
+        n = await repo.upsert_sold_offers_batch(objs)
+        total_s += n
+        n_batches += 1
+        if n_batches % 20 == 0:
+            logger.info("sold_ads: %d батчей, %d записей (running)", n_batches, total_s)
+    logger.info("sold_ads: итого %d записей", total_s)
+
+    logger.info("=" * 60)
+    logger.info(
+        "МИГРАЦИЯ ЗАВЕРШЕНА: houses=%d active_ads=%d sold_ads=%d",
+        total_h, total_a, total_s,
+    )
+    logger.info("=" * 60)
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Перенос данных из secondary_migrated.db (SQLite) в PostgreSQL."
+    )
+    parser.add_argument(
+        "--sqlite",
+        type=Path,
+        default=ROOT / "data" / "secondary_migrated.db",
+        help="Путь к SQLite (default: data/secondary_migrated.db)",
+    )
+    parser.add_argument(
+        "--db",
+        default=os.getenv(
+            "DATABASE_URL",
+            "postgresql+asyncpg://flipper:flipper_secret@127.0.0.1:5432/flipper",
+        ),
+        help="DATABASE_URL (default: $DATABASE_URL или локальный flipper)",
+    )
+    parser.add_argument(
+        "--batch-size", type=int, default=500,
+        help="Сколько строк SQLite за раз (default: 500)",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Только показать, сколько строк в SQLite (без записи)",
+    )
+    parser.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Подробный вывод (DEBUG)",
+    )
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+
+    return asyncio.run(run(args.sqlite, args.db, args.batch_size, args.dry_run))
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--sqlite", default=DEFAULT_SQLITE, help="Path to SQLite file")
-    ap.add_argument("--pg", default=DEFAULT_PG, help="PostgreSQL async URL")
-    asyncio.run(main(ap.parse_args()))
+    sys.exit(main())

@@ -1,0 +1,33 @@
+# Dev Dockerfile for the FastAPI backend (web/server.py).
+#
+# Используется только в dev-режиме: `docker compose --profile dev up -d api-dev`.
+#   - uvicorn --reload подхватывает правки в web/, packages/, services/ на лету
+#   - код монтируется как volume (см. docker-compose.yml → api-dev.volumes)
+#   - DATABASE_URL: внутри compose-сети → app_postgres:5432
+#
+# Build context — корень flipper/ (как у остальных сервисов).
+FROM python:3.11-slim
+
+ENV TZ=Europe/Moscow
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+WORKDIR /app
+
+# Install Python deps first (cache-friendly layer)
+COPY services/api/requirements.txt ./services/api/requirements.txt
+RUN pip install --no-cache-dir -r services/api/requirements.txt
+
+# Копируем код в образ на случай, если volume не смонтирован
+# (например, во время сборки образа). На рантайме mount перезаписывает.
+COPY packages/ ./packages/
+COPY web/ ./web/
+COPY services/ ./services/
+
+ENV PYTHONPATH="/app"
+
+EXPOSE 8000
+
+# `--reload` watches /app — volume mounts with host edits are picked up instantly.
+CMD ["uvicorn", "web.server:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

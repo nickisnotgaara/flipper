@@ -34,6 +34,10 @@ RETRY_BACKOFF_BASE = int(os.getenv("SCHEDULER_RETRY_BACKOFF_BASE", "30"))
 
 JOB_TIMEOUT_PARSER = int(os.getenv("SCHEDULER_JOB_TIMEOUT_PARSER", str(3 * 3600)))
 JOB_TIMEOUT_COUNTER = int(os.getenv("SCHEDULER_JOB_TIMEOUT_COUNTER", str(30 * 60)))
+# Weekly: domclick_sold v2 (list 100 pages BFF + parse ~2000 cards) и winners_sold
+# могут занимать 2-4ч в первые прогоны. Дефолт 4ч с запасом.
+JOB_TIMEOUT_WEEKLY = int(os.getenv("SCHEDULER_WEEKLY_TIMEOUT", str(4 * 3600)))
+JOB_TIMEOUT_PIPELINE = int(os.getenv("SCHEDULER_PIPELINE_TIMEOUT", str(3 * 3600)))
 
 # Сколько ждать первой строки вывода от `docker compose run`. Если за это время
 # процесс не выдал ничего — считаем, что compose завис на depends_on/healthcheck.
@@ -336,6 +340,7 @@ async def run_docker_compose(
 
 _parsing_lock = asyncio.Lock()
 _counter_lock = asyncio.Lock()
+_weekly_lock = asyncio.Lock()
 _shutdown_event = asyncio.Event()
 
 
@@ -394,7 +399,7 @@ async def job_parsing() -> None:
         logger.info("===== %s START =====", job_label)
 
         avans_ok = await _run_with_retry(
-            "parser_cian",
+            "cian_active",
             ["--mode", "avans"],
             JOB_TIMEOUT_PARSER,
             f"{job_label}/avans",
@@ -402,11 +407,11 @@ async def job_parsing() -> None:
         if not avans_ok:
             await send_alert(
                 f"<b>Scheduler</b>\n"
-                f"parser_cian --mode avans FAILED после {MAX_RETRIES} попыток ({job_label})"
+                f"cian_active --mode avans FAILED после {MAX_RETRIES} попыток ({job_label})"
             )
 
         offers_ok = await _run_with_retry(
-            "parser_cian",
+            "cian_active",
             ["--mode", "offers"],
             JOB_TIMEOUT_PARSER,
             f"{job_label}/offers",
@@ -414,7 +419,7 @@ async def job_parsing() -> None:
         if not offers_ok:
             await send_alert(
                 f"<b>Scheduler</b>\n"
-                f"parser_cian --mode offers FAILED после {MAX_RETRIES} попыток ({job_label})"
+                f"cian_active --mode offers FAILED после {MAX_RETRIES} попыток ({job_label})"
             )
 
         status = "OK" if (avans_ok and offers_ok) else "PARTIAL" if (avans_ok or offers_ok) else "FAILED"
@@ -464,6 +469,163 @@ async def job_category_counter() -> None:
         _counter_lock.release()
 
 
+async def job_scoring() -> None:
+    """DEPRECATED. Scorer архивирован (см. archive/scorer/README.md).
+
+    Эта функция оставлена как no-op для обратной совместимости, но не
+    вызывается из build_scheduler(). Если в .env случайно остались
+    SCORER_* / SECONDARY_* переменные, ничего не сломается.
+    """
+    logger.warning("job_scoring вызван, но scorer архивирован. Ничего не делаю.")
+
+
+async def job_weekly(service: str, label: str) -> None:
+    """Generic weekly job для парсеров с еженедельным расписанием.
+
+    Args:
+        service: имя docker-compose сервиса ('winners_sold' | 'domclick_sold').
+        label: человекочитаемая метка для логов и алертов.
+    """
+    job_label = f"weekly/{label}"
+
+    if not _weekly_lock.acquire_nowait():
+        logger.warning("%s: lock занят, пропускаю", job_label)
+        return
+    try:
+        logger.info("===== %s START =====", job_label)
+        ok = await _run_with_retry(
+            service,
+            ["python", "-m", f"services.parsers.{service}.main"],
+            JOB_TIMEOUT_WEEKLY,
+            job_label,
+        )
+        if not ok:
+            await send_alert(
+                f"<b>Scheduler</b>\n{job_label} FAILED after {MAX_RETRIES} retries"
+            )
+        logger.info("===== %s END (%s) =====", job_label, "OK" if ok else "FAILED")
+    except Exception as exc:
+        logger.exception("Необработанная ошибка %s: %s", job_label, exc)
+        await send_alert(f"<b>Scheduler</b>\n{job_label} exception: {exc}")
+    finally:
+        _weekly_lock.release()
+
+
+async def job_weekly_winners() -> None:
+    await job_weekly("winners_sold", "winners_sold")
+
+
+async def job_weekly_domclick() -> None:
+    await job_weekly("domclick_sold", "domclick_sold")
+
+
+async def job_pipeline_daily() -> None:
+    """02:00 MSK — ежедневный pipeline (fetch-missing всех активных ads).
+
+    Запускает ``pipeline_runner`` через docker compose. Эта джоба
+    отвечает за свежесть данных: cian_active парсер в 10:00/18:00 ловит
+    НОВЫЕ объявления, а pipeline — перепроверяет старые (могли быть сняты,
+    обновлена цена, и т.п.). Без этого active_ads потихоньку протухает.
+
+    Если pipeline не отработал >36ч — health-check шлёт TG-алерт.
+    """
+    job_label = "pipeline_daily"
+    if not _weekly_lock.acquire_nowait():
+        logger.warning("%s: lock занят, пропускаю", job_label)
+        return
+    try:
+        logger.info("===== %s START =====", job_label)
+        ok = await _run_with_retry(
+            "pipeline_runner",
+            [],
+            JOB_TIMEOUT_PIPELINE,
+            job_label,
+        )
+        if not ok:
+            await send_alert(
+                f"<b>Scheduler</b>\n{job_label} FAILED after {MAX_RETRIES} retries"
+            )
+        logger.info("===== %s END (%s) =====", job_label, "OK" if ok else "FAILED")
+    except Exception as exc:
+        logger.exception("Необработанная ошибка %s: %s", job_label, exc)
+        await send_alert(f"<b>Scheduler</b>\n{job_label} exception: {exc}")
+    finally:
+        _weekly_lock.release()
+
+
+# Sticky state для health-check: чтобы не спамить алертами каждый час,
+# шлём только при переходе OK → STALE и при первом STALE после OK.
+_last_healthcheck_state: dict[str, str] = {}
+
+
+async def job_pipeline_healthcheck() -> None:
+    """Раз в час проверяем, что pipeline_runner не отвалился.
+
+    Лезем в таблицу pipeline_runs (создаётся в services/pipeline_runner/main.py)
+    и смотрим на последний finished_at. Если >36ч — TG-алерт (один раз,
+    чтобы не повторять каждый час).
+    """
+    dsn = os.getenv("DATABASE_URL", "")
+    if not dsn:
+        return
+    if dsn.startswith("postgresql+asyncpg://"):
+        dsn = dsn.replace("postgresql+asyncpg://", "postgresql://", 1)
+    try:
+        import asyncpg
+        conn = await asyncpg.connect(dsn)
+        try:
+            row = await conn.fetchrow("""
+                SELECT max(finished_at) AS last_finished
+                FROM pipeline_runs
+                WHERE source = 'cian_active' AND status = 'OK'
+            """)
+        finally:
+            await conn.close()
+    except Exception as exc:
+        logger.warning("healthcheck: не удалось подключиться к БД: %s", exc)
+        return
+
+    last = row["last_finished"] if row else None
+    if last is None:
+        # Никогда не запускался — это ОК для нового деплоя, но шлём алерт
+        # если стартовали >1 дня назад.
+        if "no_runs_ever" not in _last_healthcheck_state:
+            _last_healthcheck_state["no_runs_ever"] = "1"
+            await send_alert(
+                "<b>Scheduler</b>\npipeline_runner ещё ни разу не отработал. "
+                "Проверь docker compose run --rm pipeline_runner вручную."
+            )
+        return
+    # Если был STALE — сбросить state на OK
+    _last_healthcheck_state.pop("no_runs_ever", None)
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    if last.tzinfo is None:
+        from datetime import timezone as _tz
+        last = last.replace(tzinfo=_tz.utc)
+    age_h = (now - last).total_seconds() / 3600
+    if age_h > 36:
+        cur = "stale"
+        prev = _last_healthcheck_state.get("pipeline_age")
+        if prev != cur:
+            _last_healthcheck_state["pipeline_age"] = cur
+            await send_alert(
+                f"<b>Scheduler</b>\npipeline_runner не запускался "
+                f"<b>{age_h:.0f}ч</b> (последний успех: {last.isoformat()}). "
+                f"Данные на карте могут быть несвежими."
+            )
+    else:
+        prev = _last_healthcheck_state.get("pipeline_age")
+        if prev == "stale":
+            await send_alert(
+                f"<b>Scheduler</b>\npipeline_runner ожил: последний успех "
+                f"{age_h:.1f}ч назад ({last.isoformat()})."
+            )
+        _last_healthcheck_state["pipeline_age"] = "fresh"
+        logger.debug("pipeline healthcheck OK: last run %.1fh ago", age_h)
+
+
 # ---------------------------------------------------------------------------
 # Планировщик
 # ---------------------------------------------------------------------------
@@ -498,6 +660,49 @@ def build_scheduler() -> AsyncIOScheduler:
         id="parsing_18",
         name="parsing (avans+offers) @ 18:00 MSK",
         misfire_grace_time=3600,
+        max_instances=1,
+    )
+
+    # Weekly: winners + domclick (еженедельно, чтобы не толкаться с ежедневным cian_active)
+    WEEKLY_DOW = os.getenv("WEEKLY_RUN_DAY_OF_WEEK", "sun")
+    WINNERS_HOUR = int(os.getenv("WEEKLY_WINNERS_HOUR", "6"))
+    DOMCLICK_HOUR = int(os.getenv("WEEKLY_DOMCLICK_HOUR", "7"))
+
+    scheduler.add_job(
+        job_weekly_winners,
+        CronTrigger(day_of_week=WEEKLY_DOW, hour=WINNERS_HOUR, minute=0, timezone=MSK),
+        id="winners_sold_weekly",
+        name=f"winners_sold @ {WEEKLY_DOW.upper()} {WINNERS_HOUR:02d}:00 MSK",
+        misfire_grace_time=3600,
+        max_instances=1,
+    )
+    scheduler.add_job(
+        job_weekly_domclick,
+        CronTrigger(day_of_week=WEEKLY_DOW, hour=DOMCLICK_HOUR, minute=0, timezone=MSK),
+        id="domclick_sold_weekly",
+        name=f"domclick_sold @ {WEEKLY_DOW.upper()} {DOMCLICK_HOUR:02d}:00 MSK",
+        misfire_grace_time=3600,
+        max_instances=1,
+    )
+
+    # Daily: pipeline_runner в 02:00 MSK (пока cian_active спит)
+    PIPELINE_HOUR = int(os.getenv("PIPELINE_DAILY_HOUR", "2"))
+    scheduler.add_job(
+        job_pipeline_daily,
+        CronTrigger(hour=PIPELINE_HOUR, minute=0, timezone=MSK),
+        id="pipeline_daily_02",
+        name=f"pipeline_daily @ {PIPELINE_HOUR:02d}:00 MSK",
+        misfire_grace_time=3600,
+        max_instances=1,
+    )
+
+    # Hourly: health-check pipeline (не отвалился ли он)
+    scheduler.add_job(
+        job_pipeline_healthcheck,
+        CronTrigger(minute=15, timezone=MSK),  # каждый час в :15
+        id="pipeline_healthcheck_hourly",
+        name="pipeline_healthcheck @ :15 hourly",
+        misfire_grace_time=600,
         max_instances=1,
     )
 

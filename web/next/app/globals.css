@@ -1,0 +1,347 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ----- 2GIS-inspired light theme ----- */
+html, body { height: 100%; }
+body {
+  background: #f5f6f8;
+  color: #1c1c21;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overscroll-behavior: none;
+}
+
+/* Smooth-ish on the map, and a slightly heavier hint that the user
+ * can drag the canvas around. */
+.leaflet-grab, .leaflet-interactive {
+  cursor: grab;
+}
+.leaflet-dragging .leaflet-grab,
+.leaflet-dragging .leaflet-interactive {
+  cursor: grabbing;
+}
+
+/* ----- UI motion ----- */
+/* Mobile bottom-sheet uses slide-up; fade-in is reused for toast/empty. */
+@keyframes slideUp {
+  0%   { transform: translateY(100%); opacity: 0; }
+  100% { transform: translateY(0);    opacity: 1; }
+}
+.animate-slide-up { animation: slideUp .32s cubic-bezier(.2,.7,.2,1); }
+@media (min-width: 768px) {
+  .animate-slide-up { animation: slideIn .3s cubic-bezier(.2,.7,.2,1); }
+}
+
+/* Subtle scrollbar (light) */
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: #d8dbe1; border-radius: 8px; }
+*::-webkit-scrollbar-thumb:hover { background: #c5c8d0; }
+
+/* ----- surface helpers (light cards) ----- */
+.card {
+  background: #ffffff;
+  border: 1px solid #e6e8ec;
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(15,18,28,0.04), 0 1px 3px rgba(15,18,28,0.06);
+}
+.card-lg {
+  background: #ffffff;
+  border: 1px solid #e6e8ec;
+  border-radius: 16px;
+  box-shadow: 0 2px 4px rgba(15,18,28,0.05), 0 8px 24px rgba(15,18,28,0.08);
+}
+
+.btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all;
+}
+.btn-primary {
+  background: #e63946;
+  color: #fff;
+  box-shadow: 0 1px 2px rgba(230,57,70,0.20), 0 2px 8px -2px rgba(230,57,70,0.40);
+}
+.btn-primary:hover { background: #cc2e3b; }
+.btn-ghost {
+  background: #f5f6f8;
+  border: 1px solid #e6e8ec;
+  color: #3a3a44;
+}
+.btn-ghost:hover { background: #eceef2; }
+
+.chip {
+  @apply inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium;
+}
+
+.kbd {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #f5f6f8;
+  border: 1px solid #e6e8ec;
+  color: #6b6b75;
+}
+
+/* ----- Leaflet overrides (light) ----- */
+.leaflet-container {
+  background: #f5f6f8;     /* match page bg in case tiles haven't loaded */
+  outline: none;
+  font-family: inherit;
+}
+.leaflet-control-zoom {
+  border: none !important;
+  box-shadow: 0 1px 2px rgba(15,18,28,0.05), 0 4px 12px rgba(15,18,28,0.08) !important;
+  border-radius: 10px !important;
+  overflow: hidden;
+}
+.leaflet-control-zoom a {
+  background: #ffffff !important;
+  color: #3a3a44 !important;
+  border: 1px solid #e6e8ec !important;
+  border-radius: 0 !important;
+  width: 32px !important;
+  height: 32px !important;
+  line-height: 30px !important;
+  font-size: 18px !important;
+  font-weight: 400 !important;
+}
+.leaflet-control-zoom a:first-child { border-top: none !important; }
+.leaflet-control-zoom a:last-child  { border-bottom: none !important; }
+.leaflet-control-zoom a:hover { background: #f5f6f8 !important; color: #1c1c21 !important; }
+.leaflet-control-attribution {
+  background: rgba(255,255,255,0.85) !important;
+  color: #9090a0 !important;
+  font-size: 10px !important;
+  border-radius: 6px 0 0 0;
+  padding: 2px 8px !important;
+  backdrop-filter: blur(8px);
+}
+.leaflet-control-attribution a { color: #6b6b75 !important; }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip {
+  background: #ffffff !important;
+  color: #1c1c21 !important;
+  border: 1px solid #e6e8ec !important;
+  border-radius: 12px !important;
+  box-shadow: 0 4px 12px rgba(15,18,28,0.08), 0 12px 32px rgba(15,18,28,0.10) !important;
+}
+.leaflet-popup-content { margin: 12px 14px; font-family: inherit; color: #1c1c21; }
+.leaflet-popup-close-button { color: #9090a0 !important; padding: 6px !important; }
+
+/* ----- 2GIS-style house markers ----- */
+
+/* ----- embla drag hardening -----
+ * The carousel lives inside an <a> card. Without these rules the
+ * browser's native link-drag (ghost URL on mousedown+move) starts
+ * inside the <a> and steals pointer events away from embla, so the
+ * user can't swipe the photos. The fix is layered:
+ *   - `user-select:none` + `touch-action:pan-y` on the viewport so
+ *     text selection and vertical pan don't fight embla
+ *   - `-webkit-user-drag:none` on images so the browser doesn't try
+ *     to start an HTML5 image drag
+ *   - `a:has(.embla-viewport)` block kills the same at the anchor
+ * `!important` keeps us safe against Tailwind resets that might re-
+ * enable selection on a child. */
+.embla-viewport {
+  touch-action: pan-y !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -webkit-touch-callout: none !important;
+  -webkit-tap-highlight-color: transparent;
+}
+.embla-viewport img {
+  -webkit-user-drag: none !important;
+  -webkit-touch-callout: none !important;
+}
+/* The browser's link-drag starts at the <a>. Block it there too so
+ * the carousel never has to fight a ghost URL tooltip. */
+a:has(.embla-viewport) {
+  -webkit-user-drag: none !important;
+}
+
+.marker-house {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 2px solid #d0d3da;
+  color: #6b6b75;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  transition: transform .12s ease-out, box-shadow .12s ease-out;
+  box-shadow: 0 2px 6px rgba(15,18,28,0.18);
+  position: relative;
+  cursor: pointer;
+}
+.marker-house:hover {
+  transform: scale(1.15);
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(15,18,28,0.30);
+}
+.marker-house.only-active {
+  background: #e63946;
+  border-color: #ffffff;
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(230,57,70,0.45);
+}
+.marker-house.only-deact {
+  background: #ffffff;
+  border-color: #b5b5be;
+  color: #9090a0;
+  box-shadow: 0 2px 6px rgba(15,18,28,0.18);
+}
+.marker-house.many-ads {
+  background: #e63946;
+  border-color: #ffffff;
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(230,57,70,0.45);
+}
+/* Synthetic cluster: not in any house DB, but has ads. Dashed amber border. */
+.marker-house.synthetic {
+  background: #f59e0b;
+  border-color: #ffffff;
+  color: #ffffff;
+  border-style: dashed;
+  border-width: 2px;
+  box-shadow: 0 2px 8px rgba(245,158,11,0.45);
+}
+/* House in our DB but no cian ads (active or sold) — exists in real
+ * life, just no one has ever posted an ad for it. Tiny dim dot so the
+ * map is still readable at street level when there are 30k of these. */
+.marker-house.no-ads {
+  width: 10px;
+  height: 10px;
+  background: #c8c8d0;
+  border: 1.5px solid #ffffff;
+  box-shadow: 0 1px 3px rgba(15,18,28,0.20);
+  color: transparent;
+  font-size: 0;
+}
+.marker-house .deact-dot {
+  position: absolute;
+  top: -3px; right: -3px;
+  width: 11px; height: 11px;
+  border-radius: 999px;
+  background: #9090a0;
+  border: 2px solid #ffffff;
+  box-shadow: 0 1px 2px rgba(15,18,28,0.30);
+}
+.marker-house.many-ads .deact-dot {
+  background: #1c1c21;
+}
+.marker-house .deact-badge {
+  position: absolute;
+  top: -4px; right: -4px;
+  min-width: 16px; height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #1c1c21;
+  color: #fff;
+  font-size: 9px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  border: 1.5px solid #ffffff;
+  font-family: 'JetBrains Mono', monospace;
+}
+.leaflet-marker-icon { background: transparent !important; border: none !important; }
+
+/* ----- 2GIS-style cluster marker ----- */
+.cluster-marker {
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 999px;
+  background: #e63946;
+  color: #fff;
+  font-weight: 700;
+  /* Font is set inline in the icon's `style="font-size:..."` so it
+     scales with the bubble. This default is only used if a caller
+     forgets to set it. */
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  border: 2px solid #ffffff;
+  box-shadow: 0 3px 8px rgba(230,57,70,0.40), 0 0 0 1px rgba(230,57,70,0.20);
+  cursor: pointer;
+  transition: transform .12s ease-out;
+  text-align: center;
+}
+.cluster-marker:hover {
+  transform: scale(1.08);
+}
+.cluster-marker-wrap { background: transparent !important; border: none !important; }
+
+
+/* Tiny "sold" pulse used in panels */
+.pulse-red {
+  width: 8px; height: 8px; border-radius: 999px;
+  background: #e63946;
+  animation: pulseRed 1.6s ease-out infinite;
+  flex-shrink: 0;
+}
+@keyframes pulseRed {
+  0% { box-shadow: 0 0 0 0 rgba(230,57,70,0.55); }
+  70% { box-shadow: 0 0 0 6px rgba(230,57,70,0); }
+  100% { box-shadow: 0 0 0 0 rgba(230,57,70,0); }
+}
+
+/* ----- 2GIS-style location pin ----- */
+/* One teardrop shape, one colour (violet), used both for the
+ * search-result pin and the selected-house pin. Same visual
+ * language wherever the map is "pointing at this exact spot".
+ * Class names use the generic `location-pin*` prefix on purpose —
+ * no `search-*` / `selected-*` colour variants.
+ *
+ * Violet (not brand red) on purpose: the house markers themselves
+ * are red, so a red pin on top of them blends in. Violet gives the
+ * pin its own visual identity. */
+.location-pin-wrap {
+  background: transparent !important;
+  border: none !important;
+}
+.location-pin {
+  position: relative;
+  width: 28px;
+  height: 40px;
+  pointer-events: auto;
+  filter: drop-shadow(0 4px 8px rgba(124, 58, 237, 0.45));
+  animation: locationPinDrop .35s cubic-bezier(.2,.8,.2,1) both;
+}
+.location-pin-dot {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  border-radius: 50% 50% 50% 0;
+  transform: translateX(-50%) rotate(-45deg);
+  background: linear-gradient(180deg, #a78bfa 0%, #7c3aed 100%);
+  border: 2.5px solid #ffffff;
+  box-sizing: border-box;
+}
+.location-pin-pulse {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: rgba(124, 58, 237, 0.50);
+  animation: locationPinPulse 1.8s ease-out infinite;
+  z-index: -1;
+  transform: translate(-50%, -50%);
+  transform-origin: center;
+}
+@keyframes locationPinPulse {
+  0%   { transform: translate(-50%, -50%) scale(0.6); opacity: 0.95; }
+  70%  { transform: translate(-50%, -50%) scale(2.4); opacity: 0;    }
+  100% { transform: translate(-50%, -50%) scale(2.4); opacity: 0;    }
+}
+@keyframes locationPinDrop {
+  0%   { transform: translateY(-22px) scale(0.7); opacity: 0; }
+  60%  { transform: translateY(2px)   scale(1.06); opacity: 1; }
+  100% { transform: translateY(0)     scale(1);    opacity: 1; }
+}

@@ -1,47 +1,98 @@
-# Flipper — Система мониторинга недвижимости Cian
+# Flipper — Система мониторинга недвижимости
 
 ## Архитектура
 
 Система состоит из нескольких Docker-контейнеров, управляемых через `docker-compose.yml`:
 
-| Сервис | Назначение |
-|--------|-----------|
-| `parser_cian` | Основной парсер объявлений (два режима: `offers` и `avans`) |
-| `category_counter` | Подсчёт количества объявлений по категориям → вкладка `Balans` |
-| `cookie_manager` | Микросервис управления cookies для Firecrawl (Chromium + FastAPI) |
-| `html_to_markdown` | Go-сервис конвертации HTML → Markdown |
-| `app_redis` | Redis для cookie_manager |
+| Сервис | Назначение | Расписание |
+|--------|-----------|------------|
+| `app_postgres` | PostgreSQL — единая БД для всех парсеров (таблицы `houses`, `active_ads`, `sold_ads`) | always-on |
+| `app_redis` | Redis для `cookie_manager` | always-on |
+| `html_to_markdown` | Go-сервис конвертации HTML → Markdown (для `cian_active`) | always-on |
+| `cookie_manager` | Микросервис управления cookies для Firecrawl (Chromium + FastAPI) | always-on |
+| `scheduler` | APScheduler: cron-подобный запуск парсеров | always-on |
+| `cian_active` | **Активные** объявления CIAN через Firecrawl + Google Sheets | 10:00, 18:00 |
+| `category_counter` | Подсчёт объявлений CIAN по категориям (вкладка `Balans`) | 09:00 |
+| `cian_sold` | **Снятые публикации** CIAN (deactivated_offers) → PostgreSQL | **вручную** |
+| `winners_sold` | Снятые публикации baza-winner.ru → PostgreSQL | **Sun 06:00** (еженедельно) |
+| `domclick_sold` | Снятые публикации domclick.ru → PostgreSQL | **Sun 07:00** (еженедельно) |
+| `flatinfo_houses` | Реестр домов flatinfo.ru → PostgreSQL | **вручную** |
 
 Внешняя зависимость: **self-hosted Firecrawl** (отдельный docker-compose, сеть `firecrawl_backend`).
 
 ---
 
-## Вкладки Google Sheets
+## Архитектура данных
 
-| Вкладка | Источник | Критерий попадания |
-|---------|----------|--------------------|
-| **FILTERS** | Ввод вручную | URL-фильтры поисковых страниц Cian для режима `offers` |
-| **Аванс** | `parser_cian --mode avans` | Активные объявления без аванса. Парсятся повторно каждый запуск. Удаляются при снятии или внесении аванса |
-| **Аванс_Продано** | `parser_cian --mode avans` | В объявлении найден смысл «внесён аванс/задаток» и с момента публикации прошло **не более недели** (days_in_exposition ≤ 7) → добавляется в «Аванс_Продано», при этом строка удаляется из «Аванс», а ссылка удаляется из БД (перестаём отслеживать) |
-| **Продано** | `parser_cian --mode offers` | Снятые с публикации **в течение недели** (days_in_exposition ≤ 7) |
-| **Offers_Parser** | `parser_cian --mode offers` | **Все** объявления из FILTERS; объявления с **≥ 200 уникальных просмотров за сегодня** подсвечиваются цветом |
-| **Signals_Parser** | `parser_cian --mode offers` | Объявления, удовлетворяющие хотя бы одному из: **снижение цены ≥ 5%** или **≥ 3 снижений цены за 30 дней** |
-| **Balans** | `category_counter` | Количество объявлений по категориям (Вторичка/Первичка × Москва/МО) с формулой суммы и точкой равновесия |
+Все парсеры пишут в **единую PostgreSQL БД** через пакет `packages/flipper_db/`:
+
+```
+┌─────────────────┐
+│     houses      │ ◄────────────┐
+│─────────────────│              │
+│ id              │              │
+│ source          │              │  FK house_id
+│ external_house_id│             │
+│ cian_house_id   │              │
+│ address, lat, lng│             │
+│ year, levels    │              │
+│ building_type   │              │
+│ package         │              │
+│ raw_data (JSONB)│              │
+└─────────────────┘              │
+                                 │
+        ┌────────────────────────┴────────┐
+        ▼                                 ▼
+┌──────────────────┐              ┌──────────────────┐
+│   active_ads     │              │     sold_ads     │
+│──────────────────│              │──────────────────│
+│ id               │              │ id               │
+│ source           │              │ source           │
+│ cian_id          │              │ external_id      │
+│ house_id (FK)    │              │ house_id (FK)    │
+│ price, area      │              │ price, area      │
+│ floor, rooms     │              │ floor, rooms     │
+│ views, price_hist│              │ exposition_days  │
+│ is_active        │              │ sold_date        │
+└──────────────────┘              └──────────────────┘
+```
+
+### Source-теги
+
+| Сервис | Source | Что пишет |
+|---|---|---|
+| `parsers/cian_active` | `cian_active` | `active_ads` (с `filter_id` 1-6) + (sold <7д) `sold_ads` |
+| `parsers/cian_sold` | `cian_sold` | `houses` + `sold_ads` (вся история) |
+| `parsers/winners_sold` | `winners_sold` | `houses` + `sold_ads` |
+| `parsers/domclick_sold` | `domclick_sold` | `houses` + `sold_ads` |
+| `parsers/flatinfo_houses` | `flatinfo_houses` | `houses` (только дома) |
+
+`active_ads.filter_id` — связь с `cian_filters` (Google Sheets → вкладки):
+- `1-4` = **offers** (фильтры по году постройки и ЦАО)
+- `5` = **signals** (Опека)
+- `6` = **advance** (Запрет долги / аванс)
+
+### Маппинг источников → таблицы
+
+| Сервис | `houses` | `active_ads` | `sold_ads` | Когда |
+|---|---|---|---|---|
+| `parsers/cian_active` | + | + | + (sold <7д) | 10:00, 18:00 |
+| `parsers/cian_sold` | + | — | + (вся история) | **вручную** |
+| `parsers/winners_sold` | + | — | + | **Sun 06:00 weekly** |
+| `parsers/domclick_sold` | + | — | + | **Sun 07:00 weekly** |
+| `parsers/flatinfo_houses` | + | — | — | **вручную** |
 
 ---
 
-## Сервис `parser_cian`
+## Сервис `parser_cian` → `parsers/cian_active`
 
 ### Режимы работы
 
 Запускается с флагом `--mode`:
 
 ```
-python -m services.parser_cian.main --mode offers
-python -m services.parser_cian.main --mode avans
-
-# Alias (для совместимости со старым режимом)
-python -m services.parser_cian.main --mode regular   # == offers
+docker compose run --rm cian_active --mode offers
+docker compose run --rm cian_active --mode avans
 ```
 
 Дополнительные флаги:
@@ -55,13 +106,12 @@ Step 1: Валидация конфигурации (.env)
 Step 2: Инициализация (SQLite, Google Sheets, Firecrawl)
 Step 3: Получение поисковых URL
          offers  → из вкладки FILTERS (Google Sheets)
-         avans   → статичный URL из config (avans_search_url)
+         avans   → статичный URL из config
 Step 4: Извлечение ссылок объявлений из поисковых страниц
          (cianparser + ротация прокси из data/proxies.txt)
 Step 5: Парсинг каждого объявления через Firecrawl
          (N параллельных воркеров, QueueManager)
-Step 6: (Опционально) очистка устаревших активных объявлений из БД (> ad_max_age_days)
-Step 7: Итоговый отчёт
+Step 6: Итоговый отчёт
 ```
 
 ### Парсинг одного объявления (AdParser)
@@ -84,7 +134,7 @@ Step 7: Итоговый отчёт
   - Если AI определила аванс/задаток и `days_in_exposition ≤ 7` → записать в **«Аванс_Продано»**, удалить строку из **«Аванс»** и удалить из БД (перестать отслеживать)
 4. **Если снято с публикации** (`is_active = False`):
    - Удалить из **«Аванс»** + из БД
-  - «Продано» фиксируется только для `mode=offers` и только если `days_in_exposition ≤ 7`
+   - «Продано» фиксируется только для `mode=offers` и только если `days_in_exposition ≤ 7`
 5. **Иначе** (активное, аванс не внесён):
    - Записать/обновить в **«Аванс»** (без цвета), обновить БД
    - Объявление будет спарсено повторно при следующем запуске
@@ -92,34 +142,21 @@ Step 7: Итоговый отчёт
 #### Режим `offers`
 
 1. Парсим объявление → `ParsedAdData`
-2. Вычисляем `signal_reason` (check_signals: снижение цены ≥ 5% или ≥ 3 снижений за 30 дней)
+2. Вычисляем `signal_reason` (снижение цены ≥ 5% или ≥ 3 снижений за 30 дней)
 3. **Если снято с публикации** (`is_active = False`):
-   - Удаляем из `cian_active_ads` в БД → больше не парсим
+   - Удаляем из `active_ads` в БД → больше не парсим
    - Описание → «Объявление снято с публикации»
-  - Если `days_in_exposition ≤ 7` → записываем во вкладку **«Продано»**
-   - Если объявление ранее было в Offers_Parser/Signals_Parser → строка окрашивается сероватым цветом `#D9D9D9`
+   - Если `days_in_exposition ≤ 7` → записываем во вкладку **«Продано»**
 4. **Если активно**:
    - Если `unique_views ≥ 200` → **Offers_Parser** + Telegram-уведомление
    - Если сработал `signal_reason` → **Signals_Parser** + Telegram-уведомление
    - Если критерий больше не выполняется → строка удаляется из соответствующей вкладки
-
-### Сигналы (Signals_Parser)
-
-Критерии (OR-логика):
-
-| Критерий | Условие |
-|----------|---------|
-| Крупное снижение цены | Любое снижение ≥ 5% от предыдущей цены за всю историю |
-| Частые снижения | ≥ 3 снижений цены за последние 30 дней |
-
-Результат записывается в колонку `W: Reason` (например: `drops>=3 AND max_drop>=7.2%`).
 
 ---
 
 ## Сервис `category_counter`
 
 Подсчитывает количество активных объявлений на Cian по четырём категориям:
-
 - Вторичка Москва
 - Первичка Москва
 - Первичка МО
@@ -131,31 +168,199 @@ Step 7: Итоговый отчёт
 
 ---
 
-## База данных (SQLite)
+## Сервис `scheduler`
 
-Файл: `data/parser_cian.db`
+`scheduler` — единственный always-on сервис парсинга. Запускает остальные контейнеры через `docker compose run --rm` по расписанию.
+
+### Расписание (MSK)
+
+| Время | Задача |
+|---|---|
+| 09:00 | `category_counter` |
+| 10:00 | `cian_active --mode avans`, затем `--mode offers` |
+| 18:00 | `cian_active --mode avans`, затем `--mode offers` |
+| **Sun 06:00** | `winners_sold` (еженедельно) |
+| **Sun 07:00** | `domclick_sold` (еженедельно) |
+
+Остальные парсеры (`cian_sold`, `flatinfo_houses`) — **только вручную** через `docker compose run --rm <service>`.
+
+Scheduler автоматически:
+- Запускает контейнеры через `docker compose run --rm` (тот же сценарий, что и при ручном запуске по SSH)
+- Повторяет при ошибке (до 3 попыток с exponential backoff)
+- Отправляет Telegram-алерты при сбоях
+- Использует lock чтобы задачи не пересекались
+
+---
+
+## Структура парсеров (services/parsers/)
+
+Все 5 парсеров следуют единому шаблону:
+
+```
+services/parsers/
+├── _common.py                       # общий код (setup_logging, run_subprocess, safe_*)
+│
+├── cian_active/                     # активные CIAN (Firecrawl + Google Sheets)
+│   ├── main.py                      # оркестратор
+│   ├── config.py                    # Pydantic Settings (.env)
+│   ├── importer.py                  # импорт из data/parser_cian.db → active_ads (filter_id 1-6)
+│   ├── acquirer/                    # всё что нужно для парсинга
+│   │   ├── cards.py                 # parse individual ads (Firecrawl)
+│   │   ├── search.py                # parse search pages
+│   │   ├── queue.py                 # concurrency
+│   │   ├── models.py                # Pydantic models
+│   │   └── legacy_db/               # legacy CianFilter/CianActiveAd/CianSoldAd
+│   │       ├── base.py
+│   │       └── repository.py
+│   ├── cianparser/                  # vendored
+│   └── tests/                       # test_acquirer.py (15) + test_importer.py (5)
+│
+├── cian_sold/                       # снятые CIAN (deactivated_offers)
+│   ├── main.py                      # оркестратор
+│   ├── importer.py                  # result.jsonl → houses + sold_ads
+│   └── acquirer/                    # subpackage (тяжёлый парсер)
+│       ├── cli.py                   # CLI (--workers, --failed, ...)
+│       ├── runner.py                # threading executor
+│       ├── pipeline.py              # HousePipeline
+│       ├── models.py
+│       ├── config.py, cookies.py, errors.py, io.py, ...
+│       ├── clients/                 # HTTP-клиенты
+│       ├── test_cookies.py          # acquirer-internal unit tests
+│       └── test_models.py
+│   └── tests/                       # test_importer.py (13 тестов)
+│
+├── winners_sold/                    # baza-winner.ru (новостройки + вторичка)
+│   ├── main.py
+│   ├── acquirer.py                  # CLI парсера (--category new|secondary)
+│   ├── filters.py                   # утилита (фильтр по круглой цене)
+│   ├── exporter.py                  # JSON → xlsx
+│   ├── importer.py
+│   └── tests/                       # test_importer.py
+│
+├── domclick_sold/                   # domclick.ru (снятые)
+│   ├── main.py
+│   ├── acquirer.py                  # CLI (--mode list|cards|full)
+│   ├── exporter.py                  # JSON → xlsx
+│   ├── importer.py
+│   └── tests/                       # test_importer.py
+│
+└── flatinfo_houses/                 # flatinfo.ru (реестр домов)
+    ├── main.py
+    ├── acquirer.py                  # детальные страницы домов
+    ├── exporter.py                  # JSON → xlsx
+    ├── houses.py                    # утилита (фильтрация списка)
+    ├── houses_to_excel.py           # утилита
+    ├── importer.py
+    └── tests/                       # test_importer.py
+```
+
+**Единый шаблон** для всех парсеров:
+- `main.py` — оркестратор (acquire → load → export)
+- `acquirer.py` (или `acquirer/` для сложных) — данные из источника → JSON/JSONL
+- `importer.py` — JSON → House/ActiveAd/SoldAd (через `packages/flipper_db`)
+- `exporter.py` (опц.) — JSON → .xlsx
+- `tests/` — pytest
+
+---
+
+## Ручной запуск парсеров
+
+```bash
+# Любой парсер можно дёрнуть руками:
+docker compose run --rm cian_active --mode offers
+docker compose run --rm cian_sold
+docker compose run --rm winners_sold
+docker compose run --rm domclick_sold
+docker compose run --rm flatinfo_houses
+```
+
+---
+
+## Общая БД (packages/flipper_db/)
+
+Все парсеры используют единый пакет `packages/flipper_db/`:
+
+```python
+from packages.flipper_db import (
+    init_db, FlipperRepository, House, ActiveAd, SoldAd, Source,
+)
+```
+
+Схема в `packages/flipper_db/models.py` (cross-dialect — работает с PostgreSQL и SQLite для тестов).
+
+### Идемпотентность
+
+Все upsert-операции идемпотентны: `ON CONFLICT (source, external_id) DO UPDATE`. Повторный запуск парсера не плодит дубликаты.
+
+### Source-теги
+
+`Source` enum в `packages/flipper_db/enums.py`:
+- `CIAN_ACTIVE = "cian_active"`
+- `CIAN_SOLD = "cian_sold"`
+- `WINNERS_SOLD = "winners_sold"`
+- `DOMCLICK_SOLD = "domclick_sold"`
+- `FLATINFO_HOUSES = "flatinfo_houses"`
+
+---
+
+## База данных (PostgreSQL)
 
 ### Таблицы
 
 | Таблица | Назначение |
 |---------|-----------|
-| `cian_active_ads` | Активные объявления (URL, source, parsed_data JSON, is_parsed, is_active) |
-| `cian_sold_ads` | Снятые с публикации (URL, parsed_data, publish_date) |
-| `cian_filters` | Поисковые URL из FILTERS (URL + meta строки FILTERS) |
+| `houses` | Реестр домов (с `lat/lng`, `source`, `cian_house_id` для будущей карты) |
+| `active_ads` | Активные объявления (только от `cian_active`); `filter_id` 1-6 = offers/signals/advance |
+| `sold_ads` | Снятые/проданные объявления (от всех источников) |
+| `geo_cache` | Кэш геокодирования (для будущей карты) |
 
-### Жизненный цикл объявления в БД
+### Текущее состояние (после полной миграции данных)
+
+- **houses**: 181,454
+  - `cian_sold`: 28,242
+  - `domclick_sold`: 2,000
+  - `flatinfo_houses`: 41,489
+  - `winners_sold`: 109,723
+- **active_ads**: 3,393 (все `cian_active`)
+  - `filter_id=1` (offers: до 2000г не-ЦАО): 1,451
+  - `filter_id=2` (offers: после 2000г не-ЦАО): 1,287
+  - `filter_id=3` (offers: до 2000г ЦАО): 468
+  - `filter_id=4` (offers: после 2000г ЦАО): 160
+  - `filter_id=5` (signals: Опека): 18
+  - `filter_id=6` (advance: Запрет долги): 9
+- **sold_ads**: 343,044
+  - `cian_active`: 2
+  - `cian_sold`: 231,319
+  - `domclick_sold`: 2,000
+  - `winners_sold`: 109,723
+
+### Миграция из старых источников
+
+```bash
+# 1. Из secondary/ JSON/JSONL
+py -m scripts.migrate_secondary_files_to_postgres \
+    --secondary ../secondary \
+    --db "sqlite+aiosqlite:///data/secondary_migrated.db"
+
+# 2. Из старой data/parser_cian.db (cian_active)
+py -m scripts.migrate_cian_active_db \
+    --source data/parser_cian.db \
+    --db "sqlite+aiosqlite:///data/secondary_migrated.db"
+```
+
+Оба скрипта идемпотентны (ON CONFLICT DO UPDATE), BATCH_SIZE=1000.
+
+### Жизненный цикл записи (active_ads)
 
 ```
-Новый URL с поисковой страницы
+Новая ссылка с поисковой страницы (cian_active)
   ↓
-cian_active_ads (is_parsed=False)
+houses (source=cian_active, external_house_id=...)
   ↓ парсинг Firecrawl
-cian_active_ads (is_parsed=True, parsed_data=JSON)
+active_ads (source=cian_active, filter_id=1..6, is_parsed=True)
   ↓
   ├─ is_active=True → остаётся, парсится повторно при следующем запуске
-  ├─ is_active=False → перемещается в cian_sold_ads, удаляется из active
-  └─ (опционально) publish_date > ad_max_age_days → удаляется из active (remove_stale_active_ads),
-     если `CLEANUP_STALE_ACTIVE_ADS=true`
+  ├─ is_active=False → перемещается в sold_ads, удаляется из active_ads
 ```
 
 ---
@@ -174,99 +379,31 @@ Firecrawl работает со своими прокси/без прокси (�
 
 ---
 
-## Конфигурация (.env)
-
-| Переменная | Описание | По умолчанию |
-|------------|----------|--------------|
-| `FIRECRAWL_API_KEY` | API-ключ Firecrawl (обязательно) | — |
-| `FIRECRAWL_BASE_URL` | URL self-hosted Firecrawl | `http://localhost:3002` |
-| `SPREADSHEET_ID` | ID документа Google Sheets | — |
-| `CREDENTIALS_PATH` | Путь к JSON Service Account | `/app/credentials.json` |
-| `PARSER_CONCURRENCY` | Количество параллельных воркеров | `20` |
-| `MIN_UNIQUE_VIEWS` | Порог уникальных просмотров для Offers_Parser | `200` |
-| `CLEANUP_STALE_ACTIVE_ADS` | Чистить активные объявления старше порога | `False` |
-| `AD_MAX_AGE_DAYS` | Порог возраста (дней от publish_date) для очистки, если включена | `7` |
-| `SOLD_MAX_AGE_DAYS` | Окно для попадания в «Продано» (дней от publish_date) | `7` |
-| `USE_PROXIES_FOR_SEARCH` | Использовать прокси из файла | `True` |
-| `CIAN_PROXIES_FILE` | Путь к файлу с прокси | `data/proxies.txt` |
-| `TG_BOT_TOKEN` | Токен Telegram-бота для уведомлений | — |
-| `TG_CHAT_ID` | ID чата для Telegram-уведомлений | — |
-| `PARSER_CIAN_LOG_FILE` | Файл логов (ротация 10 МБ × 5) | `data/logs/parser_cian.log` |
-| `LOG_LEVEL` | Уровень логирования | `INFO` |
-
----
-
 ## Telegram-уведомления
 
 Отправляются при:
 - `Offers_Parser Match` — объявление набрало ≥ 200 уникальных просмотров (подсветка)
 - `Signals_Parser Match` — сработал сигнал снижения цены
 - `Avans Match` — объявление из режима avans набрало ≥ 200 просмотров
+- `Scheduler: <task> FAILED` — задача упала после 3 попыток
 
 ---
 
-## Структура колонок Google Sheets (A–W)
+## Будущее: интерактивная карта
 
-| Колонка | Содержимое |
-|---------|-----------|
-| A | URL объявления |
-| B | Дата публикации |
-| C | Цена (руб.) |
-| D | Заголовок |
-| E | Полный адрес |
-| F | Описание (или «Объявление снято с публикации» если `is_active = False`) |
-| G | Цена за м² |
-| H | Площадь (м²) |
-| I | Год постройки |
-| J | Дней в каталоге |
-| K | Район |
-| L | Этаж (текущий/всего) |
-| M | Тип жилья (Вторичка/Новостройка) |
-| N | Станция метро |
-| O | Время до метро (мин.) |
-| P | Округ |
-| Q | Ремонт |
-| R | Количество комнат |
-| S | Всего просмотров |
-| T | Уникальных просмотров (сегодня) |
-| U | Cian ID |
-| V | Время парсинга (МСК) |
-| W | Reason (для Signals_Parser) |
+Архитектура закладывается под будущую интерактивную карту (2gis-style):
+- Клик на дом → окошко с активными (`active_ads`) и снятыми (`sold_ads`) объявлениями
+- Карта строится через `SELECT * FROM houses WHERE lat IS NOT NULL AND lng IS NOT NULL`
+- Сшивка домов из разных источников через `cian_house_id`
+- Данные готовы — нужна только визуализация (FastAPI + Leaflet/Mapbox)
 
-После колонки **W** в `Offers_Parser` / `Signals_Parser` дописываются данные из строки вкладки **FILTERS**
-(чтобы понимать, из какого фильтра пришло объявление): сначала реальный URL фильтра, затем отображаемое значение ячейки A,
-дальше — значения остальных колонок этой строки FILTERS.
+См. `PLAN.md` секция 0 — это зафиксированный план.
 
 ---
 
-## Цветовая кодировка строк
+## См. также
 
-| Цвет | Hex | Значение |
-|------|-----|----------|
-| Белый (по умолчанию) | `#FFFFFF` | Активное объявление |
-| Зелёный (для просмотров) | `#B5D6A8` | `unique_views ≥ 200` (выделение в Offers_Parser и Signals_Parser) |
-| Серый | `#D9D9D9` | Объявление снято с публикации (в Offers_Parser, Signals_Parser) |
-
----
-
-## Docker-команды
-
-```bash
-# Запуск парсера (offers)
-docker compose --profile manual run --rm parser_cian --mode offers
-
-# Запуск парсера (avans)
-docker compose --profile manual run --rm parser_cian --mode avans
-
-# Только сбор ссылок (без парсинга карточек)
-docker compose --profile manual run --rm parser_cian --mode offers --only-links
-
-# Парсинг без сбора ссылок (из БД)
-docker compose --profile manual run --rm parser_cian --mode offers --skip-links
-
-# Alias (старое имя режима)
-# docker compose --profile manual run --rm parser_cian --mode regular
-
-# Подсчёт категорий
-docker compose --profile manual run --rm category_counter python -m services.category_counter.main
-```
+- `DEPLOY.md` — развёртывание на сервере
+- `README.md` — общий обзор
+- `PLAN.md` — детальный план реструктуризации 2026-07-25
+- `archive/scorer/README.md` — как восстановить скоринг, если понадобится

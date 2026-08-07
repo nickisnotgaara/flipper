@@ -24,10 +24,10 @@ for _env_key, (_docker_host, _local_host) in _DOCKER_TO_LOCAL.items():
     if _docker_host in _val:
         os.environ[_env_key] = _val.replace(_docker_host, _local_host)
 
-from services.parser_cian.parser import AdParser  # noqa: E402
-from services.parser_cian.models import ParsedAdData, parse_to_sheets_row  # noqa: E402
-from services.parser_cian.queue_manager import check_signals, _is_avans_deposit  # noqa: E402
-from services.parser_cian.config import settings  # noqa: E402
+from services.parsers.cian_active.acquirer.cards import AdParser  # noqa: E402
+from services.parsers.cian_active.acquirer.models import ParsedAdData, parse_to_sheets_row  # noqa: E402
+from services.parsers.cian_active.acquirer.queue import check_signals, _is_avans_deposit  # noqa: E402
+from services.parsers.cian_active.config import settings  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,

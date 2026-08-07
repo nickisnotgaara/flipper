@@ -27,5 +27,9 @@ COPY services/scheduler/ /app/services/scheduler/
 
 ENV TZ=Europe/Moscow
 ENV SCHEDULER_COMPOSE_DIR=/app
+# bind-mount /app:./ ниже перезапишет WORKDIR содержимое, но PYTHONPATH
+# остаётся в env, поэтому `python -m services.scheduler.main` найдёт
+# services/ через корень /app даже после volume mount.
+ENV PYTHONPATH="/app"
 
 CMD ["python", "-m", "services.scheduler.main"]

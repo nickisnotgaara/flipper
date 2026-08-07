@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Flipper Map — дома Москвы</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+  <style>
+    html, body { margin:0; padding:0; height:100%; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+    #app { display:flex; height:100vh; }
+    #sidebar { width: 380px; min-width: 320px; max-width: 480px; background:#1c1f24; color:#e6e6e6; display:flex; flex-direction:column; border-right: 1px solid #2a2d33; }
+    #header { padding: 12px 16px; background: #14171c; border-bottom: 1px solid #2a2d33; }
+    #header h1 { margin:0; font-size:15px; font-weight:600; letter-spacing:0.3px; }
+    #header .sub { font-size:12px; color:#9aa3ad; margin-top:4px; }
+    #stats { display:flex; gap:14px; margin-top:8px; font-size:11px; color:#9aa3ad; }
+    #stats .pill { background:#252a31; padding:3px 8px; border-radius:10px; }
+    #stats .pill b { color:#e6e6e6; }
+    #filter { padding: 10px 16px; border-bottom: 1px solid #2a2d33; display:flex; gap:8px; align-items:center; font-size:12px; }
+    #filter label { display:flex; align-items:center; gap:5px; cursor:pointer; user-select:none; }
+    #filter input[type=checkbox] { accent-color: #ff7e3c; }
+    #list { flex:1; overflow-y:auto; }
+    .ad-card { padding: 10px 16px; border-bottom: 1px solid #252a31; cursor:pointer; }
+    .ad-card:hover { background: #252a31; }
+    .ad-card.selected { background: #2e3540; border-left: 3px solid #ff7e3c; }
+    .ad-card .price { font-size:15px; font-weight:600; color:#ff7e3c; }
+    .ad-card .meta { font-size:11px; color:#9aa3ad; margin-top:3px; }
+    .ad-card .addr { font-size:11px; color:#c2c8d0; margin-top:2px; }
+    .empty { padding: 30px 16px; text-align:center; color:#6c7280; font-size:13px; }
+    #map { flex: 1; }
+    .loading { padding: 30px; text-align:center; color:#9aa3ad; }
+
+    /* Cluster colors */
+    .marker-cluster-small { background-color: rgba(181, 226, 140, 0.6); }
+    .marker-cluster-small div { background-color: rgba(110, 204, 57, 0.6); color:#000; }
+    .marker-cluster-medium { background-color: rgba(241, 211, 87, 0.6); }
+    .marker-cluster-medium div { background-color: rgba(240, 194, 12, 0.6); color:#000; }
+    .marker-cluster-large { background-color: rgba(253, 156, 115, 0.6); }
+    .marker-cluster-large div { background-color: rgba(241, 128, 23, 0.6); color:#000; }
+
+    /* Marker badge with count */
+    .ad-marker { background:#ff7e3c; color:#fff; border:2px solid #fff; border-radius:50%; font-weight:600; font-size:11px; display:flex; align-items:center; justify-content:center; box-shadow: 0 1px 4px rgba(0,0,0,0.4); }
+    .ad-marker.zero { background:#3a4250; color:#aab1bb; }
+
+    /* Popup */
+    .leaflet-popup-content-wrapper { background:#1c1f24; color:#e6e6e6; border-radius:6px; }
+    .leaflet-popup-tip { background:#1c1f24; }
+    .leaflet-popup-content { margin: 10px 14px; font-size:12px; line-height:1.5; }
+    .leaflet-popup-content b { color:#ff7e3c; }
+    .leaflet-popup-content a { color:#7eb6ff; text-decoration:none; }
+    .leaflet-popup-content a:hover { text-decoration:underline; }
+  </style>
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div id="header">
+      <h1>Flipper Map — дома Москвы</h1>
+      <div class="sub">Источник: <b>flatinfo</b> (28к домов) · CIAN: активные объявления</div>
+      <div id="stats">
+        <span class="pill">🏠 <b id="s-houses">–</b> домов</span>
+        <span class="pill">📌 <b id="s-ads">–</b> активных</span>
+        <span class="pill">🔗 <b id="s-linked">–</b> привязано</span>
+      </div>
+    </div>
+    <div id="filter">
+      <label><input type="checkbox" id="f-with-ads" checked> Только дома с объявлениями</label>
+      <span style="margin-left:auto;color:#6c7280;font-size:11px;" id="f-count">–</span>
+    </div>
+    <div id="list">
+      <div class="loading" id="loading">Загрузка домов…</div>
+    </div>
+  </aside>
+  <div id="map"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script>
+const API = "";  // same origin
+const MAP_CENTER = [55.7558, 37.6173];
+const MAP_ZOOM = 11;
+
+let map, cluster;
+let currentHouses = {};  // id -> house props
+
+function initMap() {
+  map = L.map('map', { preferCanvas: true }).setView(MAP_CENTER, MAP_ZOOM);
+  // OSM tiles — no API key
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+
+  cluster = L.markerClusterGroup({
+    chunkedLoading: true,
+    maxClusterRadius: 50,
+    disableClusteringAtZoom: 17,
+    spiderfyOnMaxZoom: true,
+    showCoverageOnHover: false,
+  });
+  map.addLayer(cluster);
+  map.on('moveend zoomend', updateListForView);
+}
+
+async function loadStats() {
+  const r = await fetch(`${API}/api/stats`);
+  const s = await r.json();
+  document.getElementById('s-houses').textContent = s.houses_with_coords.toLocaleString('ru');
+  document.getElementById('s-ads').textContent = s.active_total.toLocaleString('ru');
+  document.getElementById('s-linked').textContent = s.active_linked.toLocaleString('ru');
+  document.getElementById('f-count').textContent = `${s.houses_with_ads.toLocaleString('ru')} с объявлениями`;
+}
+
+async function loadHouses(onlyWithAds) {
+  document.getElementById('loading').textContent = 'Загрузка домов…';
+  const params = new URLSearchParams();
+  params.set('with_ads_only', onlyWithAds ? 'true' : 'false');
+  params.set('limit', '50000');
+  const r = await fetch(`${API}/api/houses?${params}`);
+  const data = await r.json();
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('f-count').textContent = `${data.count.toLocaleString('ru')} домов`;
+  return data;
+}
+
+function makeMarker(feat) {
+  const p = feat.properties;
+  const count = p.active_count || 0;
+  const icon = L.divIcon({
+    className: 'ad-marker' + (count === 0 ? ' zero' : ''),
+    html: count > 0 ? count : '',
+    iconSize: count >= 100 ? [34,34] : count >= 10 ? [28,28] : [22,22],
+    iconAnchor: count >= 100 ? [17,17] : count >= 10 ? [14,14] : [11,11],
+  });
+  const m = L.marker(feat.geometry.coordinates.slice().reverse(), { icon, houseId: p.id });
+  m.bindPopup(buildPopup(p), { maxWidth: 320 });
+  m.on('click', () => onHouseClick(p.id));
+  return m;
+}
+
+function buildPopup(p) {
+  const houseUrl = `https://www.cian.ru/house/${p.cian_house_id || ''}`;
+  const yearStr = p.year_built ? `, ${p.year_built} г.` : '';
+  const typeStr = p.building_type ? ` (${p.building_type})` : '';
+  let html = `<b>${p.address || (p.street + ', ' + p.house_num)}</b><br>`;
+  html += `<span style="color:#9aa3ad">${p.levels || '?'} этажей${yearStr}${typeStr}</span><br>`;
+  if (p.series) html += `<span style="color:#9aa3ad">${p.series}</span><br>`;
+  html += `<br>Активных: <b>${p.active_count}</b>`;
+  if (p.deactivated_count > 0) html += ` · Снято: <b>${p.deactivated_count}</b>`;
+  if (p.cian_house_id) {
+    html += `<br><a href="${houseUrl}" target="_blank">Открыть на CIAN ↗</a>`;
+  }
+  html += `<br><a href="#" onclick="event.preventDefault(); onHouseClick(${p.id}); return false;">📋 Подробности в панели</a>`;
+  return html;
+}
+
+async function renderHouses(onlyWithAds) {
+  const data = await loadHouses(onlyWithAds);
+  cluster.clearLayers();
+  currentHouses = {};
+  const markers = [];
+  for (const feat of data.features) {
+    currentHouses[feat.properties.id] = feat.properties;
+    markers.push(makeMarker(feat));
+  }
+  cluster.addLayers(markers);
+  return data;
+}
+
+function updateListForView() {
+  // No-op for now (left panel only shows ads after click)
+}
+
+async function onHouseClick(houseId) {
+  const r = await fetch(`${API}/api/houses/${houseId}`);
+  if (!r.ok) return;
+  const d = await r.json();
+  renderAds(d);
+}
+
+function fmtPrice(p) {
+  if (!p) return '—';
+  if (p >= 1_000_000) return (p / 1_000_000).toFixed(1).replace('.0','') + ' млн';
+  return (p / 1000).toFixed(0) + ' тыс';
+}
+
+function fmtArea(a) { return a ? a.toFixed(1) + ' м²' : '?'; }
+function fmtFloor(f, t) { return (f != null && t != null) ? `${f}/${t} эт` : ''; }
+
+function renderAds(data) {
+  const list = document.getElementById('list');
+  const h = data.house;
+  const ads = data.active_ads;
+  const deact = data.deactivated_count;
+
+  let html = `<div style="padding:14px 16px;background:#14171c;border-bottom:1px solid #2a2d33;">
+    <div style="font-size:14px;font-weight:600;">${h.address || (h.street + ', ' + h.house_num)}</div>
+    <div style="font-size:11px;color:#9aa3ad;margin-top:4px;">
+      ${h.building_type || '?'}${h.year_built ? ', ' + h.year_built + ' г.' : ''} · ${h.levels || '?'} эт.
+      ${h.series ? '· ' + h.series : ''}
+    </div>
+    <div style="font-size:11px;color:#9aa3ad;margin-top:4px;">
+      Активных: <b style="color:#ff7e3c">${ads.length}</b> · Снято: <b>${deact}</b>
+    </div>
+  </div>`;
+
+  if (ads.length === 0) {
+    html += `<div class="empty">Нет привязанных активных объявлений.<br><br>
+      <span style="font-size:11px;">(Снятые: ${deact})</span></div>`;
+  } else {
+    for (const a of ads) {
+      const url = a.url || `https://www.cian.ru/sale/flat/${a.cian_id}/`;
+      const metro = a.metro_station ? ` · ${a.metro_station}${a.metro_walk_time ? ' (' + a.metro_walk_time + ' мин)' : ''}` : '';
+      html += `<a class="ad-card" href="${url}" target="_blank" style="text-decoration:none;color:inherit;display:block;">
+        <div class="price">${fmtPrice(a.price)} ₽</div>
+        <div style="margin-top:2px;">${a.rooms ? a.rooms + '-комн, ' : ''}${fmtArea(a.area)} · ${fmtFloor(a.floor_current, a.floor_total)}</div>
+        <div class="meta">${a.district || ''}${a.okrug ? ' (' + a.okrug + ')' : ''}${metro}</div>
+        ${a.days_in_exposition != null ? `<div class="meta">📅 ${a.days_in_exposition} дн. на сайте</div>` : ''}
+        ${a.renovation ? `<div class="meta">🔨 ${a.renovation}</div>` : ''}
+      </a>`;
+    }
+  }
+
+  list.innerHTML = html;
+  // Highlight selected house marker
+  cluster.eachLayer(m => {
+    const id = m.options && m.options.houseId;
+    if (id === houseId) {
+      m.openPopup();
+      // pan to it
+      map.panTo(m.getLatLng(), { animate: true });
+    }
+  });
+}
+
+// houseId is already attached via Leaflet marker options in makeMarker.
+
+document.getElementById('f-with-ads').addEventListener('change', async (e) => {
+  await renderHouses(e.target.checked);
+});
+
+(async () => {
+  initMap();
+  await loadStats();
+  await renderHouses(true);
+})();
+</script>
+</body>
+</html>

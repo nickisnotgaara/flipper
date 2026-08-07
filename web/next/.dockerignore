@@ -1,0 +1,26 @@
+# Frontend build context — что НЕ тащим в образ.
+# (next.config.mjs → output: 'export' → нам нужны только исходники, не сборка.)
+
+node_modules
+.next
+out
+.next/cache
+.turbo
+
+# Локальные env-файлы (секреты не должны попасть в бандл)
+.env
+.env.local
+.env.*.local
+
+# IDE / OS
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Тесты / отчёты
+coverage
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

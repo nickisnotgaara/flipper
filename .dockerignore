@@ -1,0 +1,59 @@
+# Docker ignore for flipper/ root build context.
+# Used by services/api/Dockerfile (and pipeline_runner if rebuilt).
+# Should keep build context small — every .py / .md / .json etc. NOT in
+# this list is still copied.
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+*.egg-info
+
+# Node / Next
+node_modules
+.next
+.nuxt
+dist
+out
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-store
+
+# VCS / editor
+.git
+.gitignore
+.gitattributes
+.vscode
+.idea
+*.swp
+*.swo
+
+# Data and secrets (NEVER in image)
+data/
+.env
+.env.*
+*.env
+credentials.json
+cookies.json
+accounts.json
+flippercrawl/
+archive/
+
+# Build/test artefacts
+*.tsbuildinfo
+.next-build-stats.json
+
+# Docs that aren't needed at runtime
+*.md
+docs/
+
+# OS
+.DS_Store
+Thumbs.db

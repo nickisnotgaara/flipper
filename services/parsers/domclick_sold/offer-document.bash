@@ -1,0 +1,15 @@
+curl 'https://domclick.ru/card/sale__flat__2076448824' \
+  -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7' \
+  -H 'Accept-Language: en' \
+  -H 'Cache-Control: max-age=0' \
+  -H 'Connection: keep-alive' \
+  -b 'qrator_jsr=v2.0.1777767082.797.52d76607h9ib7ny9|d0VpKi7neFUd5o6a|fkRm3y8+glG70OlOCbINceM76sCvsG3gXB9L9t2S3hHkHzpIphOwjvvxOBZ1+vtl3sFHn0fdwPFzx3iUekH+dw==-g3h69dK/D7GiFgc55O/WYXNfXIc=-00; qrator_jsid2=v2.0.1777767082.797.52d76607h9ib7ny9|go0gFNyPY2XwAnmE|IqTfFDzO8AEGOXbUFAqhB4oQ/OTIINM4FL9XRBYhg7KqdFHraNJppimElI8NvrkiXUTQv24acK8TaDEGWM9IrcbgnpQJQsxr1EZO/dNWMazFbvBCJ+ghrvB38ipTu+HPG4GRaxT36ep12Ij9brPBvXkKHk+KjOrB3Us9vYGN928=-JXIJU2VJyQ4VnBbflAMxGZOgp3g=; ns_session=9bf9fca7-9b19-4e7b-8300-b0a18e63d093; logoSuffix=; iosAppLink=; showDddIntro=false; dddIntroOnline=false; _ym_uid=1777767084415499213; _ym_d=1777767084; RETENTION_COOKIES_NAME=4fcfb28242c545e0b3734c78eb3bd0be:iQbscAgxq2mfX6hi42SOYExMVoE; sessionId=5e6baa40c3584876bb73cd8514904e3f:5MB8B2R4vTBrvhC0nUx6yzkKKNE; UNIQ_SESSION_ID=a2ce581464e34b11971b17d930e3a452:FlNpj94TF1TIcbYICX3uxNsEcJo; _ym_isad=2; _sv=SV1.00462ab7-d956-4874-a67d-d9a4e4879270.1777767040; _sas.2c534172f17069dd8844643bb4eb639294cd4a7a61de799648e70dc86bc442b9=SV1.00462ab7-d956-4874-a67d-d9a4e4879270.1777767040.1777767084; _visitId=ca8a781e-6984-4381-81f5-3e92bc6c8c38-f4f0dcc432ac8ba6; adtech_uid=85f038dc-498a-4c80-90a6-2567f774d219%3Adomclick.ru; top100_id=t1.7711713.578157722.1777767084713; region={%22data%22:{%22name%22:%22%D0%9C%D0%BE%D1%81%D0%BA%D0%B2%D0%B0%22%2C%22regionGuid%22:%221d1463ae-c80f-4d19-9331-a1b68a85b553%22}%2C%22isAutoResolved%22:true}; tmr_lvid=d68be592fc814b2d11898e60e3835500; tmr_lvidTS=1777767085322; regionAlert=1; _sas=SV1.00462ab7-d956-4874-a67d-d9a4e4879270.1777767040.1777767086; tmr_detect=0%7C1777767087695; t3_sid_7711713=s1.1180009951.1777767084714.1777767091151.1.4.1.0..; tmr_reqNum=11' \
+  -H 'Sec-Fetch-Dest: document' \
+  -H 'Sec-Fetch-Mode: navigate' \
+  -H 'Sec-Fetch-Site: same-origin' \
+  -H 'Sec-Fetch-User: ?1' \
+  -H 'Upgrade-Insecure-Requests: 1' \
+  -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36' \
+  -H 'sec-ch-ua: "Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"' \
+  -H 'sec-ch-ua-mobile: ?0' \
+  -H 'sec-ch-ua-platform: "Windows"'
