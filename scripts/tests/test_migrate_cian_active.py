@@ -98,7 +98,7 @@ def test_active_ad_from_old_row_basic():
     a = _active_ad_from_old_row(row, cols)
     assert a is not None
     assert a.source == "cian_active"
-    assert a.cian_id == "111"
+    assert a.external_id == "111"
     assert a.url == "https://www.cian.ru/sale/flat/111/"
     assert a.cian_house_id == 222
     assert a.price == 10_000_000
@@ -118,7 +118,7 @@ def test_active_ad_from_old_row_cian_id_from_url():
 
     a = _active_ad_from_old_row(row, cols)
     assert a is not None
-    assert a.cian_id == "555123"
+    assert a.external_id == "555123"
 
 
 def test_active_ad_cian_id_null_string_falls_back_to_url():
@@ -134,7 +134,7 @@ def test_active_ad_cian_id_null_string_falls_back_to_url():
 
     a = _active_ad_from_old_row(row, cols)
     assert a is not None
-    assert a.cian_id == "777111"  # из URL, не 'null'!
+    assert a.external_id == "777111"  # из URL, не 'null'!
     assert a.filter_id == 1
 
 

@@ -96,7 +96,7 @@ async def test_import_cian_active_full(repo, tmp_path):
         a = (await session.execute(
             select(ActiveModel).where(ActiveModel.source == "cian_active")
         )).scalar_one()
-        assert a.cian_id == "111"
+        assert a.external_id == "111"
         assert a.price == 5_000_000
         assert a.is_active is True
 
@@ -202,4 +202,4 @@ async def test_import_cian_active_filter_id_preserved(repo, tmp_path):
         )).scalars().all()
         by_fid = {r.filter_id: r for r in rows}
         assert set(by_fid.keys()) == {1, 5, 6}, f"ожидали 3 filter_id, получили {set(by_fid.keys())}"
-        assert {r.cian_id for r in rows} == {"1", "5", "6"}
+        assert {r.external_id for r in rows} == {"1", "5", "6"}
