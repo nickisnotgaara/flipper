@@ -856,7 +856,7 @@ async def house_detail(house_id: int):
             raise HTTPException(404, "house not found")
 
         active = (await s.execute(text(f"""
-            SELECT id, external_id, url, price, price_per_m2, area, rooms,
+            SELECT id, external_id, source, url, price, price_per_m2, area, rooms,
                    floor_current, floor_total, metro_station, metro_walk_time,
                    district, okrug, renovation, days_in_exposition, publish_date, filter_id,
                    raw_data
@@ -886,7 +886,7 @@ async def house_detail(house_id: int):
         rd = a.raw_data if isinstance(a.raw_data, dict) else None
         return {
             "id": a.id,
-            "source": OFFERS_TABLE,
+            "source": a.source,
             "external_id": a.external_id,
             "url": a.url,
             "price": a.price,
@@ -1193,7 +1193,7 @@ async def cluster_ads(cluster_id: int):
         # that have flipped to is_active=false are surfaced via the
         # deactivated section below, so nothing is lost.
         active = (await s.execute(text(f"""
-            SELECT id, external_id, url, price, price_per_m2, area, rooms,
+            SELECT id, external_id, source, url, price, price_per_m2, area, rooms,
                    floor_current, floor_total, metro_station, metro_walk_time,
                    district, okrug, renovation, days_in_exposition, publish_date, filter_id,
                    raw_data
@@ -1230,7 +1230,7 @@ async def cluster_ads(cluster_id: int):
         rd = a.raw_data if isinstance(a.raw_data, dict) else None
         return {
             "id": a.id,
-            "source": OFFERS_TABLE,
+            "source": a.source,
             "external_id": a.external_id,
             "url": a.url,
             "price": a.price,

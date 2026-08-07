@@ -6,10 +6,9 @@ import { fetchSuggest, type SuggestItem } from '@/lib/api';
 import { useDebounce } from '@/lib/useDebounce';
 
 // Wait this long after the last keystroke before firing the suggest
-// request. Long enough to avoid hammering the API while the user is
-// mid-word, short enough to feel responsive. 2s after the user
-// reported the previous 4s felt too long.
-const SUGGEST_DEBOUNCE_MS = 2000;
+// request. 400ms is the UX sweet spot — feels instant but doesn't
+// fire on every keystroke.
+const SUGGEST_DEBOUNCE_MS = 400;
 
 /** Yandex-suggest search input. On click of a row, parent decides what
  *  to do (fly the map, open the panel, show a toast). DB-matched rows

@@ -268,13 +268,7 @@ function PanelBody({
       </DrawerBody>
 
       {hasAds && detail && (
-        <div className="shrink-0 border-t border-default-200 bg-white px-5 py-3 flex items-center justify-between gap-3 text-[11px] text-default-500">
-          <div className="min-w-0 truncate">
-            Источник: <span className="text-foreground font-medium">ЦИАН</span>
-            {detail.house.source && detail.house.source !== 'houses' && (
-              <span className="ml-1 text-default-400">· {detail.house.source}</span>
-            )}
-          </div>
+        <div className="shrink-0 border-t border-default-200 bg-white px-5 py-3 flex items-center justify-end gap-2 text-[11px] text-default-500">
           <div className="flex items-center gap-2 shrink-0">
             <Chip
               size="sm"
