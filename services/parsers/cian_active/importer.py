@@ -60,6 +60,12 @@ async def _link_ads_post_upsert(
     if db_url is None:
         db_url = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
 
+    # asyncpg expects postgresql:// (not postgresql+asyncpg:// — that's SQLAlchemy's
+    # async driver marker). Convert so the linker doesn't fail with
+    # 'scheme is expected to be either "postgresql" or "postgres"'.
+    if db_url.startswith("postgresql+asyncpg://"):
+        db_url = db_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+
     # The SQLAlchemy repo doesn't expose the freshly-upserted cian_ids,
     # so we run a full unlinked-scan. It's cheap (~0.1s with cKDTree)
     # and idempotent (``WHERE house_id IS NULL``).
