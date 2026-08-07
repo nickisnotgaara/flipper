@@ -49,6 +49,9 @@ services/cookie_manager/cookies.json
 *.sqlite3
 *.db
 *.dump
+*.err
+*.out
+logs/
 
 # Data dir (runtime data, debug scripts, dumps — всё генерируется локально)
 data/
@@ -58,6 +61,12 @@ data/
 
 # Secrets / credentials dir
 secrets/
+
+# Root-level debug/scratch scripts (single underscore prefix in repo root).
+# N.B.: `/_*.py` matches only at repo root (not services/parsers/_common.py).
+/_*.py
+/inspect_recovered.py
+/sample_test.jsonl
 
 # Debug / temporary scripts (временные дебаг-файлы)
 _tmp_*.py
