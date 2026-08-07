@@ -46,7 +46,7 @@ async def main() -> int:
         log.error("DATABASE_URL не задан")
         return 2
 
-    init_db(db_url)
+    await init_db(db_url)
     repo = FlipperRepository()  # engine уже инициализирован
 
     n_houses, n_sold = await import_cian_sold_jsonl(repo, jsonl_path)

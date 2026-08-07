@@ -728,15 +728,18 @@ async def dashboard_parsed(cian_id: int):
                 }
                 # upsert
                 await s.execute(
-                    """INSERT INTO dashboard_parsed_ads (
+                    text("""INSERT INTO dashboard_parsed_ads (
                         cian_house_id, external_id, status, title, price, price_per_m2,
                         area, rooms, floor_current, floor_total, exposition_days,
                         date_start, date_end, url, address_full, metro_station,
                         district, okrug, raw_data, cian_extraction_mode,
                         parsed_at, updated_at
                     ) VALUES (
-                        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
-                        $19::json,$20, NOW(), NOW()
+                        :cian_house_id, :external_id, :status, :title, :price, :price_per_m2,
+                        :area, :rooms, :floor_current, :floor_total, :exposition_days,
+                        :date_start, :date_end, :url, :address_full, :metro_station,
+                        :district, :okrug, CAST(:raw_data AS json), :cian_extraction_mode,
+                        NOW(), NOW()
                     )
                     ON CONFLICT (cian_house_id, external_id) DO UPDATE SET
                         status = EXCLUDED.status,
@@ -758,14 +761,29 @@ async def dashboard_parsed(cian_id: int):
                         raw_data = EXCLUDED.raw_data,
                         cian_extraction_mode = EXCLUDED.cian_extraction_mode,
                         updated_at = NOW()
-                    """,
-                    row["cian_house_id"], row["external_id"], row["status"],
-                    row["title"], row["price"], row["price_per_m2"],
-                    row["area"], row["rooms"], row["floor_current"], row["floor_total"],
-                    row["exposition_days"], row["date_start"], row["date_end"],
-                    row["url"], row["address_full"], row["metro_station"],
-                    row["district"], row["okrug"], json.dumps(row["raw_data"], default=str),
-                    row["cian_extraction_mode"],
+                    """),
+                    {
+                        "cian_house_id": row["cian_house_id"],
+                        "external_id": row["external_id"],
+                        "status": row["status"],
+                        "title": row["title"],
+                        "price": row["price"],
+                        "price_per_m2": row["price_per_m2"],
+                        "area": row["area"],
+                        "rooms": row["rooms"],
+                        "floor_current": row["floor_current"],
+                        "floor_total": row["floor_total"],
+                        "exposition_days": row["exposition_days"],
+                        "date_start": row["date_start"],
+                        "date_end": row["date_end"],
+                        "url": row["url"],
+                        "address_full": row["address_full"],
+                        "metro_station": row["metro_station"],
+                        "district": row["district"],
+                        "okrug": row["okrug"],
+                        "raw_data": json.dumps(row["raw_data"], default=str),
+                        "cian_extraction_mode": row["cian_extraction_mode"],
+                    },
                 )
                 new_rows.append(row)
             await s.commit()

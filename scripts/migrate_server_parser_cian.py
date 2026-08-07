@@ -32,7 +32,9 @@ Re-parse через flippercrawl — отдельным шагом (см. script
 
 Использование:
     # 0. Read-only коннект к серверу через переменные окружения:
-    set SERVER_DATABASE_URL=postgresql://root:pfwDA.Yn3_U%3F9i@72.56.33.73:5432/flipper
+    #    SERVER_DATABASE_URL — asyncpg DSN для серверной БД (read-only).
+    #    DATABASE_URL — URL локальной БД (куда импортируем).
+    set SERVER_DATABASE_URL=postgresql://root:SECRET@server-host:5432/flipper
     set DATABASE_URL=postgresql+asyncpg://flipper:flipper_secret@app_postgres:5432/flipper
 
     # 1. Dry-run (по умолчанию): показать что есть на сервере, без записи:

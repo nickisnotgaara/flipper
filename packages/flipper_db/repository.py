@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from .base import _engine, get_session_factory, init_db, init_engine
+from .base import get_session_factory, init_db, init_engine
 from .models import ActiveAd, House, SoldAd
 
 logger = logging.getLogger(__name__)
@@ -27,13 +27,13 @@ class FlipperRepository:
 
         Параметр database_url принимается для согласованности API, но engine
         ДОЛЖЕН быть уже инициализирован через init_db() / init_engine()
-        ДО создания репозитория. Если engine не инициализирован и database_url
-        передан — инициализирует engine (для удобства вызова из тестов).
+        ДО создания репозитория. Если database_url передан — инициализирует
+        engine (идемпотентно по URL: если engine уже с этим URL, переиспользуется).
 
         В production: init_db(db_url) → FlipperRepository() — engine переиспользуется.
         В тестах: фикстура явно вызывает init_engine(url), потом init_db(), потом FlipperRepository().
         """
-        if database_url is not None and _engine is None:
+        if database_url is not None:
             init_engine(database_url)
         self._sf: async_sessionmaker[AsyncSession] = get_session_factory()
 

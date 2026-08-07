@@ -14,6 +14,8 @@ COPY packages/ ./packages/
 COPY services/pipeline_runner/ ./services/pipeline_runner/
 # scripts/run_pipeline.py зависит от services.parsers.* — копируем всю services/
 COPY services/ ./services/
+# scripts/run_pipeline.py — точка входа pipeline ( вызывается из main.py через subprocess)
+COPY scripts/ ./scripts/
 
 # PYTHONPATH — чтобы `scripts/run_pipeline.py` находил packages и services
 ENV PYTHONPATH="/app:/app/services:/app/services/parsers"

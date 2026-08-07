@@ -96,7 +96,7 @@ def main() -> int:
         if not ids_file:
             log.error("PIPELINE_MODE=ids но PIPELINE_IDS_FILE не задан")
             return 2
-        args += ["--ids", ids_file]
+        args += ["--from-links", ids_file]
     else:
         log.error("Unknown PIPELINE_MODE=%s", mode)
         return 2

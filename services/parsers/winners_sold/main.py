@@ -44,7 +44,7 @@ async def main() -> int:
         log.error("DATABASE_URL не задан")
         return 2
 
-    init_db(db_url)
+    await init_db(db_url)
     repo = FlipperRepository()  # engine уже инициализирован
 
     total_h, total_s = 0, 0

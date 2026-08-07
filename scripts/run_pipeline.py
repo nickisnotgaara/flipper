@@ -62,6 +62,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -121,8 +122,10 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--dsn",
-        default="postgresql://flipper:flipper_secret@127.0.0.1:5432/flipper",
-        help="PostgreSQL DSN (asyncpg format: postgresql://...)",
+        default=None,
+        help="PostgreSQL DSN (asyncpg format: postgresql://...). "
+             "Default: derived from $DATABASE_URL (postgresql+asyncpg://... "
+             "is converted to postgresql://...).",
     )
 
     # One of these is required (mutually exclusive)
@@ -257,7 +260,7 @@ async def main_async(args: argparse.Namespace) -> int:
         raise SystemExit("One of --fetch-missing / --recent N / --from-links FILE / --full-cycle is required.")
 
     # asyncpg expects postgresql://, not postgresql+asyncpg://
-    dsn = args.dsn
+    dsn = args.dsn or os.getenv("DATABASE_URL") or DEFAULT_DSN
     if dsn.startswith("postgresql+asyncpg://"):
         dsn = dsn.replace("postgresql+asyncpg://", "postgresql://", 1)
 
@@ -298,12 +301,9 @@ async def main_async(args: argparse.Namespace) -> int:
         logger.info("No ads to process.")
         return 0
 
-    if args.limit > 0:
-        ad_ids = ad_ids[args.limit:]
-    if args.offset > 0:
-        ad_ids = ad_ids[args.offset:]
-    if args.limit > 0:
-        ad_ids = ad_ids[:args.limit]
+    # N.B.: LIMIT/OFFSET уже применён в SQL (см. _load_ad_ids_from_table).
+    # Раньше тут был багованный Python re-slicing (ids[args.limit:] потом
+    # ids[:args.limit]), который двойным применением ломал chunked runs.
 
     logger.info(
         "run_pipeline: source=%s ad_table=%s ads=%d (no_cleanup=%s, no_create=%s, no_link=%s)",

@@ -135,8 +135,8 @@ async def main_async(args: argparse.Namespace) -> int:
         # Backfill: ВСЕ sold_ads где source='domclick_sold' -> pipeline
         ids = await _fetch_missing_ids_from_db(logger)
         logger.info("Backfill: %s ad", len(ids))
-        if args.limit > 0:
-            ids = ids[args.limit:]
+        # Правильный chunked slicing: skip first `offset`, take first `limit`.
+        # Раньше тут был баг ids[args.limit:] (drop first `limit`) — ломал chunked runs.
         if args.offset > 0:
             ids = ids[args.offset:]
         if args.limit > 0:

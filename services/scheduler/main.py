@@ -572,6 +572,13 @@ async def job_pipeline_healthcheck() -> None:
         dsn = dsn.replace("postgresql+asyncpg://", "postgresql://", 1)
     try:
         import asyncpg
+    except ImportError:
+        logger.error(
+            "healthcheck: asyncpg не установлен — "
+            "добавь asyncpg в services/scheduler/requirements.txt и пересобери образ"
+        )
+        return
+    try:
         conn = await asyncpg.connect(dsn)
         try:
             row = await conn.fetchrow("""
@@ -581,7 +588,7 @@ async def job_pipeline_healthcheck() -> None:
             """)
         finally:
             await conn.close()
-    except Exception as exc:
+    except (asyncpg.PostgresError, OSError) as exc:
         logger.warning("healthcheck: не удалось подключиться к БД: %s", exc)
         return
 
