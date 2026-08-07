@@ -28,7 +28,7 @@ async def main() -> int:
     for category in ("new", "secondary"):
         out_name = "all_advs.json" if category == "new" else "all_advs_vtorichka.json"
         out_path = WINNERS_DIR / out_name
-        rc = run_subprocess(
+        rc = await run_subprocess(
             [str(WINNERS_DIR / "acquirer.py"),
              "--category", category,
              "--output", str(out_path)],
@@ -59,8 +59,8 @@ async def main() -> int:
 
     # 3. Опц. Excel-выгрузка
     if os.getenv("WINNERS_DUMP_XLSX", "1") == "1":
-        run_subprocess([str(WINNERS_DIR / "filters.py")], cwd=WINNERS_DIR)
-        run_subprocess([str(WINNERS_DIR / "exporter.py")], cwd=WINNERS_DIR)
+        await run_subprocess([str(WINNERS_DIR / "filters.py")], cwd=WINNERS_DIR)
+        await run_subprocess([str(WINNERS_DIR / "exporter.py")], cwd=WINNERS_DIR)
 
     log.info("===== winners_sold END (houses=%s sold_ads=%s) =====", total_h, total_s)
     return 0

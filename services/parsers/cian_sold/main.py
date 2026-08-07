@@ -26,7 +26,7 @@ async def main() -> int:
 
     # 1. Парсинг → JSONL
     jsonl_path = DATA_DIR / "result.jsonl"
-    rc = run_subprocess(
+    rc = await run_subprocess(
         ["-m", "services.parsers.cian_sold.acquirer",
          "--output", str(jsonl_path),
          "--failed", str(DATA_DIR / "failed.jsonl")],

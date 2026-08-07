@@ -28,7 +28,7 @@ async def main() -> int:
     log.info("===== flatinfo_houses START =====")
 
     # 1. Парсинг: детальные страницы домов
-    rc = run_subprocess(
+    rc = await run_subprocess(
         [str(FLATINFO_DIR / "acquirer.py"),
          "--output", str(RESULT_JSON)],
         cwd=FLATINFO_DIR,
@@ -53,7 +53,7 @@ async def main() -> int:
 
     # 3. Опц. Excel
     if os.getenv("FLATINFO_DUMP_XLSX", "1") == "1":
-        run_subprocess([str(FLATINFO_DIR / "exporter.py")], cwd=FLATINFO_DIR)
+        await run_subprocess([str(FLATINFO_DIR / "exporter.py")], cwd=FLATINFO_DIR)
 
     log.info("===== flatinfo_houses END (houses=%s) =====", n_houses)
     return 0

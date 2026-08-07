@@ -45,21 +45,21 @@ def test_setup_logging_creates_log_file(tmp_path, monkeypatch):
 
 # ============================================================ run_subprocess
 
-def test_run_subprocess_success():
+async def test_run_subprocess_success():
     """Успешный процесс → rc=0."""
-    code = run_subprocess(["-c", "print('hi')"])
+    code = await run_subprocess(["-c", "print('hi')"])
     assert code == 0
 
 
-def test_run_subprocess_failure():
+async def test_run_subprocess_failure():
     """Падающий процесс → rc != 0."""
-    code = run_subprocess(["-c", "import sys; sys.exit(42)"])
+    code = await run_subprocess(["-c", "import sys; sys.exit(42)"])
     assert code == 42
 
 
-def test_run_subprocess_with_cwd(tmp_path):
+async def test_run_subprocess_with_cwd(tmp_path):
     """cwd применяется корректно."""
-    code = run_subprocess(["-c", "import os; print(os.getcwd())"], cwd=tmp_path)
+    code = await run_subprocess(["-c", "import os; print(os.getcwd())"], cwd=tmp_path)
     assert code == 0
 
 

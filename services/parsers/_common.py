@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import subprocess
@@ -18,7 +19,25 @@ from pathlib import Path
 from typing import Optional
 
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-LOG_DIR = "/app/data/logs"  # внутри контейнера; на хосте монтируется из ./data/logs
+
+
+def _default_log_dir() -> Path:
+    """OS-aware log dir.
+
+    Приоритет:
+      1. $FLIPPER_LOG_DIR (явный override)
+      2. /app/data/logs — если мы в Docker-контейнере (Linux, /app существует)
+      3. data/logs — относительный путь для native dev (Windows/локальный Linux)
+    """
+    env = os.getenv("FLIPPER_LOG_DIR")
+    if env:
+        return Path(env)
+    if sys.platform != "win32" and Path("/app").is_dir():
+        return Path("/app/data/logs")
+    return Path("data/logs")
+
+
+LOG_DIR = str(_default_log_dir())
 
 
 def setup_logging(name: str, level: str | None = None) -> logging.Logger:
@@ -57,15 +76,19 @@ def setup_logging(name: str, level: str | None = None) -> logging.Logger:
     return logging.getLogger(name)
 
 
-def run_subprocess(
+async def run_subprocess(
     args: list[str],
     cwd: Optional[Path | str] = None,
     logger: Optional[logging.Logger] = None,
 ) -> int:
-    """Запустить шаг парсинга через subprocess, прокинуть exit code.
+    """Запустить шаг парсинга через async subprocess, прокинуть exit code.
+
+    Асинхронная обёртка над asyncio.create_subprocess_exec — НЕ блокирует
+    event loop (в отличие от subprocess.call). Стандартный вывод подпроцесса
+    прокидывается в родительский stdout/stderr (наследуется).
 
     Args:
-        args: список аргументов (например, ['/app/.../parser.py', '--mode', 'full']).
+        args: список аргументов (например, ['-m', 'services.parsers.cian_sold.acquirer', '--output', ...]).
         cwd: рабочая директория (если None — текущая).
         logger: куда логировать (если None — берётся logger по имени 'subprocess').
 
@@ -75,7 +98,28 @@ def run_subprocess(
     log = logger or logging.getLogger("subprocess")
     cmd_str = " ".join(str(a) for a in args)
     log.info("RUN: %s (cwd=%s)", cmd_str, cwd or os.getcwd())
-    rc = subprocess.call([sys.executable, *args], cwd=str(cwd) if cwd else None)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            *args,
+            cwd=str(cwd) if cwd else None,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+    except FileNotFoundError as exc:
+        log.error("FAIL: %s — файл не найден: %s", cmd_str, exc)
+        return 2
+    # Стрим stdout подпроцесса в наш лог (по строкам).
+    assert proc.stdout is not None
+    while True:
+        line = await proc.stdout.readline()
+        if not line:
+            break
+        try:
+            log.info("  | %s", line.decode("utf-8", errors="replace").rstrip())
+        except Exception:
+            pass
+    rc = await proc.wait()
     log.info("EXIT: %s → rc=%s", cmd_str, rc)
     return rc
 
