@@ -1,0 +1,1 @@
+# Keep this empty directory in git so alembic/versions/ exists for migrations.
