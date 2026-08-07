@@ -365,6 +365,8 @@ cd /opt/flipper
 git pull
 docker compose build
 docker compose up -d
+# Если есть новые миграции схемы:
+docker compose run --rm api alembic upgrade head
 ```
 
 ### Flipper (только бэкенд api, без пересборки остального)
@@ -559,22 +561,19 @@ aws cloudfront create-invalidation --distribution-id EXXXXX --paths "/*"
 
 ### 12.5 CORS
 
-CORS у FastAPI сейчас открыт всему (`allow_origins=["*"]`, см. `web/server.py`). Это ок для разработки. На проде сузьте до конкретного домена фронта, например:
+CORS управляется через переменную окружения `CORS_ORIGINS` (см. `web/server.py`).
+По умолчанию `*` (любой origin — ок для dev). На проде сузьте до домена фронта
+в `.env`:
 
-```python
-# web/server.py
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["https://flipper.example.com"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+```env
+# .env (на проде)
+CORS_ORIGINS=https://flipper.example.com,https://www.flipper.example.com
 ```
 
-После правки `web/server.py` нужно перезапустить только `flipper_api`:
+После изменения `.env` нужно перезапустить только `flipper_api`:
 
 ```bash
-docker compose up -d --no-deps --build api
+docker compose up -d --no-deps api
 ```
 
 Фронт при этом не пересобирается и не рестартует.

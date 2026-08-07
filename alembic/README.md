@@ -17,9 +17,10 @@ The DB is already populated (houses 181k, sold_ads 343k, active_ads 3.3k). We
 must NOT re-create tables — we mark the current schema as the baseline:
 
 ```bash
-# 1. Export DATABASE_URL (same as in .env):
-export DATABASE_URL=postgresql+asyncpg://flipper:flipper_secret@127.0.0.1:5432/flipper
-#    (or @app_postgres:5432 if running inside Docker)
+# 1. Export DATABASE_URL (same as in .env — app_postgres is the single source):
+export DATABASE_URL=postgresql+asyncpg://flipper:flipper_secret@app_postgres:5432/flipper
+#    (use @127.0.0.1:5432 only when running alembic OUTSIDE Docker on a host
+#     where the compose port 5432 is published — native dev fallback)
 
 # 2. Generate the initial migration from current models:
 alembic revision --autogenerate -m "initial schema"

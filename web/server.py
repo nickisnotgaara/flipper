@@ -60,9 +60,14 @@ STATIC_DIR = WEB_DIR / "static"
 
 app = FastAPI(title="Flipper Map", version="0.5.0")
 
+# CORS origins — comma-separated list in $CORS_ORIGINS, or "*" for dev.
+# Production example (in .env):
+#   CORS_ORIGINS=https://flipper.example.com,https://www.flipper.example.com
+_cors_env = os.getenv("CORS_ORIGINS", "*")
+_cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()] or ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

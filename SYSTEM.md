@@ -24,7 +24,11 @@
 
 ## Архитектура данных
 
-Все парсеры пишут в **единую PostgreSQL БД** через пакет `packages/flipper_db/`:
+Все парсеры пишут в **единую PostgreSQL БД** (`app_postgres` Docker-контейнер,
+том `pgdata`) через пакет `packages/flipper_db/`. Native PostgreSQL на хосте
+**не используется** — все сервисы (api, парсеры, scheduler, pipeline_runner)
+ходят в `app_postgres:5432` (изнутри compose-сети) через единый `DATABASE_URL`
+в `.env`. Схема-миграции — через Alembic (см. раздел "Схема-миграции" ниже).
 
 ```
 ┌─────────────────┐
@@ -349,6 +353,20 @@ py -m scripts.migrate_cian_active_db \
 ```
 
 Оба скрипта идемпотентны (ON CONFLICT DO UPDATE), BATCH_SIZE=1000.
+
+### Схема-миграции (Alembic)
+
+Сдекс-схема управляется через Alembic (`alembic/` dir, `alembic.ini` в корне).
+Модели — в `packages/flipper_db/models.py`. См. `alembic/README.md` для
+инструкций по adoption на существующей БД (`alembic stamp head`).
+
+```bash
+# Применить миграции в Docker:
+docker compose run --rm api alembic upgrade head
+
+# Сгенерировать миграцию из изменений моделей:
+docker compose run --rm api alembic revision --autogenerate -m "add X to houses"
+```
 
 ### Жизненный цикл записи (active_ads)
 
