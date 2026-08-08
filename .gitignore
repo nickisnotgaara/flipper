@@ -59,6 +59,14 @@ data/
 # N.B.: data/proxies.txt уже tracked — оставляем (нужен для парсеров).
 # Если хотим убрать — `git rm --cached data/proxies.txt`.
 
+# Parser output (runtime artifacts — JSON/XLSX produced by acquirer.py + filters/exporter).
+# The parser regenerates these on every run; committing them bloats the repo
+# (multi-hundred-MB all_advs_vtorichka.json et al.) and breaks git push.
+# Source code (acquirer.py / filters.py / exporter.py / importer.py) is kept.
+services/parsers/winners_sold/*.json
+services/parsers/winners_sold/*.xlsx
+!services/parsers/winners_sold/tests/
+
 # Secrets / credentials dir
 secrets/
 
