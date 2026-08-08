@@ -3,8 +3,8 @@
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Search, Bell, Home, ChevronRight } from 'lucide-react';
-import { Input, Button, Chip, Navbar, NavbarContent, NavbarItem } from '@heroui/react';
+import { Bell, ChevronRight } from 'lucide-react';
+import { Navbar, NavbarContent, NavbarItem, Button } from '@heroui/react';
 import { fetchStats, type Stats } from '@/lib/api';
 
 const ROUTE_LABELS: Record<string, string> = {
@@ -37,10 +37,14 @@ function getCrumbs(pathname: string): { label: string; href: string }[] {
   return crumbs;
 }
 
+function fmt(n: number | null | undefined): string {
+  if (n == null || Number.isNaN(n)) return '—';
+  return n.toLocaleString('ru-RU');
+}
+
 export default function TopBar() {
   const pathname = usePathname() || '/';
   const [stats, setStats] = useState<Stats | null>(null);
-  const [query, setQuery] = useState('');
   const crumbs = getCrumbs(pathname);
 
   useEffect(() => {
@@ -50,7 +54,7 @@ export default function TopBar() {
         if (!cancelled) setStats(s);
       })
       .catch(() => {
-        /* silent */
+        if (!cancelled) setStats(null);
       });
     return () => {
       cancelled = true;
@@ -62,65 +66,52 @@ export default function TopBar() {
       maxWidth="full"
       isBordered
       classNames={{
-        base: 'h-12 border-b border-zinc-200 bg-white',
-        wrapper: 'px-5 h-12 gap-3',
+        base: '!h-12 !bg-[var(--paper-card)] !border-b !border-[var(--rule)]',
+        wrapper: '!h-12 !px-5 !gap-4',
       }}
     >
-      <NavbarContent justify="start" className="gap-1.5 !flex-grow-0">
+      <NavbarContent justify="start" className="!gap-1.5 !flex-grow-0">
         {crumbs.map((c, i) => {
           const isLast = i === crumbs.length - 1;
           return (
             <NavbarItem key={c.href} className="!flex-grow-0">
               <div className="flex items-center gap-1.5 text-[13px]">
-                {i === 0 && <Home size={14} className="text-zinc-400" />}
                 {isLast ? (
-                  <span className="text-zinc-900 font-semibold">{c.label}</span>
+                  <span className="text-[var(--ink)] font-medium">{c.label}</span>
                 ) : (
                   <Link
                     href={c.href}
-                    className="text-zinc-500 hover:text-zinc-900 transition-colors"
+                    className="text-[var(--ink-mute)] hover:text-[var(--ink)] transition-colors"
                   >
                     {c.label}
                   </Link>
                 )}
-                {!isLast && <ChevronRight size={12} className="text-zinc-300" />}
+                {!isLast && <ChevronRight size={13} className="text-[var(--ink-faint)]" strokeWidth={2} />}
               </div>
             </NavbarItem>
           );
         })}
       </NavbarContent>
 
-      <NavbarContent justify="end" className="gap-2 !flex-grow-0">
-        <NavbarItem className="!flex-grow-0">
-          <Input
-            value={query}
-            onValueChange={setQuery}
-            placeholder="Поиск по адресу, ID, фильтру…"
-            size="sm"
-            radius="md"
-            variant="flat"
-            startContent={<Search size={14} className="text-zinc-400" />}
-            classNames={{
-              base: 'w-72',
-              inputWrapper: 'h-8 bg-zinc-100 hover:bg-white data-[focus=true]:bg-white border border-transparent data-[focus=true]:border-emerald-500',
-            }}
-          />
-        </NavbarItem>
-
+      <NavbarContent justify="end" className="!gap-3 !flex-grow-0">
         {stats && (
           <NavbarItem className="!flex-grow-0">
-            <Chip
-              size="sm"
-              variant="flat"
-              classNames={{ base: 'h-7 px-2 bg-zinc-100' }}
-              startContent={
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              }
-            >
-              <span className="text-[11px] tabular-nums text-zinc-700">
-                {stats.active_total.toLocaleString('ru-RU')} · {stats.houses.toLocaleString('ru-RU')}
+            <div className="flex items-center gap-3 text-[12px]">
+              <span className="flex items-center gap-1.5">
+                <span className="text-[var(--ink-mute)]">Активных</span>
+                <span className="text-[var(--ink)] font-semibold tabular-nums">{fmt(stats.active_total)}</span>
               </span>
-            </Chip>
+              <span className="w-px h-3 bg-[var(--rule)]" />
+              <span className="flex items-center gap-1.5">
+                <span className="text-[var(--ink-mute)]">Снято</span>
+                <span className="text-[var(--ink-soft)] font-semibold tabular-nums">{fmt(stats.deactivated_total)}</span>
+              </span>
+              <span className="w-px h-3 bg-[var(--rule)]" />
+              <span className="flex items-center gap-1.5">
+                <span className="text-[var(--ink-mute)]">Домов</span>
+                <span className="text-[var(--ink)] font-semibold tabular-nums">{fmt(stats.houses)}</span>
+              </span>
+            </div>
           </NavbarItem>
         )}
 
@@ -130,15 +121,18 @@ export default function TopBar() {
             size="sm"
             variant="light"
             aria-label="Уведомления"
-            className="text-zinc-500 data-[hover=true]:bg-zinc-100 data-[hover=true]:text-zinc-900"
+            className="!w-8 !h-8 !min-w-8 !text-[var(--ink-mute)] data-[hover=true]:!text-[var(--ink)] data-[hover=true]:!bg-[var(--paper-2)]"
           >
-            <Bell size={16} />
+            <Bell size={15} strokeWidth={2} />
           </Button>
         </NavbarItem>
 
         <NavbarItem className="!flex-grow-0">
-          <div className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-[11px] font-bold">
-            NE
+          <div className="flex items-center gap-2 pl-1 pr-2.5 h-8 rounded-md hover:bg-[var(--paper-2)] transition-colors cursor-pointer">
+            <div className="w-6 h-6 rounded-full bg-[var(--accent)] text-white font-medium text-[11px] flex items-center justify-center">
+              Н
+            </div>
+            <span className="text-[12.5px] text-[var(--ink-soft)]">Нис</span>
           </div>
         </NavbarItem>
       </NavbarContent>

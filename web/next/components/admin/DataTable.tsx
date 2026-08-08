@@ -7,7 +7,6 @@ import {
   flexRender,
   type ColumnDef,
   type SortingState,
-  type Row,
 } from '@tanstack/react-table';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useQuery } from '@tanstack/react-query';
@@ -19,12 +18,9 @@ import {
   Select,
   SelectItem,
   Pagination,
-  Dropdown,
-  DropdownTrigger,
-  DropdownMenu,
-  DropdownItem,
   Tooltip,
-  Divider,
+  Kbd,
+  Chip,
 } from '@heroui/react';
 import {
   ArrowUp,
@@ -33,24 +29,21 @@ import {
   Search,
   X,
   Download,
-  Sliders,
   SlidersHorizontal,
   RefreshCcw,
   ExternalLink,
   Rows3,
 } from 'lucide-react';
 import FilterPanel, { countActiveFilters, type FilterDef } from './FilterPanel';
-export type { FilterDef };
 import ActiveFilterChips from './ActiveFilterChips';
 import ColumnVisibilityMenu from './ColumnVisibilityMenu';
 import EmptyState from './EmptyState';
 
 // ----------------------------------------------------------------
-// Generic DataTable — v2
+// Generic DataTable — clean, professional, no decoration.
 // ----------------------------------------------------------------
 
 export type DataTableProps<T extends Record<string, any>> = {
-  /** table name on the API (e.g. "active", "sold", "hidden", "houses") */
   name: string;
   columns: ColumnDef<T, any>[];
   initialSort?: SortingState;
@@ -60,9 +53,7 @@ export type DataTableProps<T extends Record<string, any>> = {
   queryParams?: Record<string, string>;
   apiBase?: string;
   totalLabel?: string;
-  /** where clicking a row's primary id sends the user (cross-link) */
   rowHref?: (row: T) => string | null;
-  /** column id of the "primary" identifier shown in the row URL/href */
   idKey?: string;
 };
 
@@ -154,6 +145,21 @@ function getMockData(name: string, queryParams: Record<string, string>) {
   };
 }
 
+function formatNum(n: number, opts?: { decimals?: number }): string {
+  if (n == null || Number.isNaN(n)) return '—';
+  return n.toLocaleString('ru-RU', {
+    minimumFractionDigits: opts?.decimals ?? 0,
+    maximumFractionDigits: opts?.decimals ?? 0,
+  });
+}
+
+function formatPriceShort(n: number): string {
+  if (n == null || Number.isNaN(n)) return '—';
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)} млн`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)} тыс`;
+  return String(Math.round(n));
+}
+
 // ----------------------------------------------------------------
 
 export default function DataTable<T extends Record<string, any>>(props: DataTableProps<T>) {
@@ -178,15 +184,18 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
   const [selected, setSelected] = useState<Set<string | number>>(new Set());
   const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>({});
   const [density, setDensity] = useState<'comfortable' | 'compact'>('comfortable');
-  const [searchFocused, setSearchFocused] = useState(false);
   const [searchInput, setSearchInput] = useState(params.q || '');
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
 
-  // Debounce the search input into the actual query param. 250ms
-  // is enough to feel instant while not firing on every keystroke.
+  // Debounce search → 250ms
   useEffect(() => {
     const t = setTimeout(() => {
-      setParams((p) => ({ ...p, q: searchInput || undefined }));
+      setParams((p) => {
+        const next = { ...p };
+        if (searchInput) next.q = searchInput;
+        else delete next.q;
+        return next;
+      });
     }, 250);
     return () => clearTimeout(t);
   }, [searchInput]);
@@ -236,19 +245,17 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
     staleTime: 15_000,
   });
 
-  // Reset to page 1 when filters/sort/pageSize change
   useEffect(() => {
     setPage(1);
   }, [params, sort, pageSize]);
 
-  // Build the columns list — prepend a checkbox column for bulk select.
+  // Columns: prepend a checkbox column only (no row numbers).
   const allColumns = useMemo<ColumnDef<T, any>[]>(() => {
     const selCol: ColumnDef<T, any> = {
       id: '__select',
       header: ({ table }) => (
         <Checkbox
           size="sm"
-          radius="sm"
           aria-label="Выбрать все на странице"
           isSelected={table.getRowModel().rows.length > 0 && table.getRowModel().rows.every((r) => selected.has(r.original[idKey]))}
           isIndeterminate={
@@ -266,13 +273,11 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
               return next;
             });
           }}
-          classNames={{ wrapper: 'before:border-default-300' }}
         />
       ),
       cell: ({ row }) => (
         <Checkbox
           size="sm"
-          radius="sm"
           aria-label="Выбрать строку"
           isSelected={selected.has(row.original[idKey])}
           onValueChange={(v) => {
@@ -284,11 +289,10 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
               return next;
             });
           }}
-          classNames={{ wrapper: 'before:border-default-300' }}
         />
       ),
       enableSorting: false,
-      size: 36,
+      size: 40,
     };
     return [selCol, ...userColumns];
   }, [userColumns, selected, idKey]);
@@ -308,9 +312,8 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
     getRowId: (row: any, idx) => String(row[idKey] ?? idx),
   });
 
-  // Virtualizer
   const parentRef = useRef<HTMLDivElement>(null);
-  const rowHeight = density === 'compact' ? 36 : 48;
+  const rowHeight = density === 'compact' ? 40 : 48;
   const virtualizer = useVirtualizer({
     count: data?.rows.length ?? 0,
     getScrollElement: () => parentRef.current,
@@ -346,7 +349,7 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
     window.open(`${apiBase}/api/tables/${name}/export?${qs.toString()}`, '_blank');
   }, [apiBase, name, params]);
 
-  // -- keyboard shortcut: `/` focuses search
+  // '/' focuses search
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === '/' && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
@@ -359,27 +362,24 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // -- bulk actions: open all selected on the map (cross-link via rowHref)
   const selectedRows = useMemo(() => {
     if (selected.size === 0) return [];
     return (data?.rows ?? []).filter((r: any) => selected.has(r[idKey]));
   }, [data, selected, idKey]);
 
   return (
-    <div className="space-y-3">
-      {/* ========== Toolbar ========== */}
-      <div className="flex items-center gap-2 flex-wrap">
-        {/* Search */}
+    <div className="flex flex-col gap-4">
+      {/* ========== Hero search ========== */}
+      <div>
         <Input
           id="dt-search-input"
           value={searchInput}
           onValueChange={setSearchInput}
-          onFocus={() => setSearchFocused(true)}
-          onBlur={() => setSearchFocused(false)}
           placeholder="Поиск по адресу, ID, району…"
-          size="sm"
-          variant="flat"
-          startContent={<Search size={14} className="text-default-400" />}
+          size="lg"
+          variant="bordered"
+          radius="sm"
+          startContent={<Search size={18} className="text-[var(--ink-mute)]" strokeWidth={2} />}
           endContent={
             searchInput ? (
               <Button
@@ -389,196 +389,166 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
                 variant="light"
                 onPress={() => setSearchInput('')}
                 aria-label="Очистить"
-                className="w-5 h-5 min-w-5 text-default-500 data-[hover=true]:bg-default-100 data-[hover=true]:text-default-700 text-xs"
+                className="!w-6 !h-6 !min-w-6 !text-[var(--ink-mute)] data-[hover=true]:!bg-[var(--paper-2)]"
               >
-                ✕
+                <X size={13} />
               </Button>
             ) : (
-              <kbd className="hidden sm:inline-block px-1.5 py-0.5 rounded border border-default-200 bg-white text-[10px] font-mono text-default-400">
-                /
-              </kbd>
+              <Kbd className="hidden md:inline-flex">/</Kbd>
             )
           }
           classNames={{
-            base: 'flex-1 min-w-[240px] max-w-md',
-            inputWrapper:
-              'h-9 bg-default-100 data-[hover=true]:bg-default-200/70 group-data-[focus=true]:bg-white border border-transparent group-data-[focus=true]:border-default-300 transition-colors',
-            input: 'text-sm placeholder:text-default-400',
+            base: 'w-full',
+            mainWrapper: '!h-12',
+            inputWrapper: '!h-12 !bg-[var(--paper-card)] data-[hover=true]:!bg-[var(--paper-card)] group-data-[focus=true]:!bg-[var(--paper-card)]',
+            input: '!text-[15px] placeholder:!text-[var(--ink-faint)]',
           }}
         />
+      </div>
 
-        {/* Filters button */}
+      {/* ========== Filter row ========== */}
+      <div className="flex items-center gap-2 flex-wrap min-h-[36px]">
         <Button
-          size="sm"
+          size="md"
           variant={activeFilters > 0 ? 'solid' : 'bordered'}
-          color={activeFilters > 0 ? 'default' : 'default'}
+          color={activeFilters > 0 ? 'primary' : 'default'}
+          startContent={<SlidersHorizontal size={14} strokeWidth={2} />}
           onPress={() => setFilterPanelOpen(true)}
-          startContent={<SlidersHorizontal size={14} />}
-          className={
-            activeFilters > 0
-              ? 'bg-zinc-900 text-white data-[hover=true]:bg-zinc-800'
-              : 'border-default-200 data-[hover=true]:bg-default-100'
-          }
         >
           Фильтры
           {activeFilters > 0 && (
-            <span className="ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-white/20 text-[10px] font-bold tabular-nums">
+            <span className="ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 bg-white/20 text-[11px] font-semibold rounded-full tabular-nums">
               {activeFilters}
             </span>
           )}
         </Button>
 
-        {/* Columns button */}
+        <ActiveFilterChips
+          filters={filters}
+          params={params}
+          onChange={updateParam}
+          onReset={resetAll}
+        />
+
+        <div className="flex-1" />
+
+        <Tooltip content="Обновить" placement="bottom">
+          <Button
+            isIconOnly
+            size="md"
+            variant="bordered"
+            onPress={() => refetch()}
+            isDisabled={isFetching && !isLoading}
+            aria-label="Обновить"
+          >
+            <RefreshCcw size={14} strokeWidth={2} className={isFetching ? 'animate-spin' : ''} />
+          </Button>
+        </Tooltip>
+
         <ColumnVisibilityMenu
           columns={userColumns}
           visible={columnVisibility}
           onChange={setColumnVisibility}
         />
 
-        {/* Density toggle */}
         <Tooltip content={density === 'comfortable' ? 'Компактная' : 'Обычная'} placement="bottom">
           <Button
             isIconOnly
-            size="sm"
+            size="md"
             variant="bordered"
             onPress={() => setDensity((d) => (d === 'comfortable' ? 'compact' : 'comfortable'))}
             aria-label="Плотность"
-            className="border-default-200 data-[hover=true]:bg-default-100 text-default-600 w-8 min-w-8"
           >
-            <Rows3 size={14} className={density === 'compact' ? 'rotate-180' : ''} />
+            <Rows3 size={14} strokeWidth={2} />
           </Button>
         </Tooltip>
 
-        {/* Refresh */}
-        <Tooltip content="Обновить" placement="bottom">
-          <Button
-            isIconOnly
-            size="sm"
-            variant="bordered"
-            onPress={() => refetch()}
-            isDisabled={isFetching && !isLoading}
-            aria-label="Обновить"
-            className="border-default-200 data-[hover=true]:bg-default-100 text-default-600 w-8 min-w-8"
-          >
-            <RefreshCcw size={14} className={isFetching ? 'animate-spin' : ''} />
-          </Button>
-        </Tooltip>
-
-        <div className="flex-1" />
-
-        {/* Export */}
         <Button
-          size="sm"
+          size="md"
           variant="bordered"
-          startContent={<Download size={14} />}
+          startContent={<Download size={14} strokeWidth={2} />}
           onPress={exportCSV}
-          className="border-default-200 data-[hover=true]:bg-default-100"
         >
-          Export CSV
+          Export
         </Button>
       </div>
 
-      {/* ========== Active filter chips ========== */}
-      <ActiveFilterChips
-        filters={filters}
-        params={params}
-        onChange={updateParam}
-        onReset={resetAll}
-      />
-
       {/* ========== Stats line ========== */}
-      <div className="flex items-center gap-3 text-[11px] text-default-500 px-1">
+      <div className="flex items-baseline gap-3 flex-wrap text-[13px] text-[var(--ink-mute)] -mt-1">
         <span>
-          {rowCount > 0 ? (
-            <>
-              <span className="text-default-900 font-semibold tabular-nums">
-                {((page - 1) * pageSize + 1).toLocaleString('ru-RU')}–{Math.min(page * pageSize, total).toLocaleString('ru-RU')}
-              </span>{' '}
-              из{' '}
-              <span className="text-default-900 font-semibold tabular-nums">
-                {total.toLocaleString('ru-RU')}
-              </span>{' '}
-              {totalLabel}
-            </>
-          ) : isLoading ? (
-            'Загружаем…'
-          ) : (
-            <>0 {totalLabel}</>
-          )}
+          Найдено{' '}
+          <span className="font-semibold text-[var(--ink)] tabular-nums">
+            {formatNum(total)}
+          </span>{' '}
+          {totalLabel}
         </span>
         {data?.stats?.avg_price ? (
           <>
-            <span className="text-default-300">·</span>
+            <span className="text-[var(--ink-faint)]">·</span>
             <span>
-              средняя{' '}
-              <span className="text-default-700 tabular-nums">
-                {Math.round(data.stats.avg_price).toLocaleString('ru-RU')} ₽
+              ср. цена{' '}
+              <span className="font-mono tabular-nums text-[var(--ink)]">
+                {formatPriceShort(data.stats.avg_price)}
               </span>
             </span>
           </>
         ) : null}
         {data?.stats?.avg_area ? (
           <>
-            <span className="text-default-300">·</span>
+            <span className="text-[var(--ink-faint)]">·</span>
             <span>
-              средняя{' '}
-              <span className="text-default-700 tabular-nums">
-                {Math.round(data.stats.avg_area * 10) / 10} м²
+              ср. площадь{' '}
+              <span className="font-mono tabular-nums text-[var(--ink)]">
+                {Math.round(data.stats.avg_area)} м²
               </span>
             </span>
           </>
         ) : null}
-        {isFetching && !isLoading && (
-          <>
-            <span className="text-default-300">·</span>
-            <span className="inline-flex items-center gap-1 text-primary-600">
-              <Spinner size="sm" className="text-current" /> обновляем
-            </span>
-          </>
-        )}
+        {isFetching && !isLoading ? (
+          <span className="text-[var(--accent)] ml-auto flex items-center gap-1.5">
+            <span className="pulse-red" style={{ width: 6, height: 6 }} />
+            обновляем…
+          </span>
+        ) : null}
       </div>
 
       {/* ========== Table ========== */}
-      <div className="rounded-xl border border-default-200 bg-white overflow-hidden">
+      <div className="bg-[var(--paper-card)] border border-[var(--rule)] rounded-lg overflow-hidden">
         <div
-          className="overflow-auto max-h-[calc(100vh-340px)]"
+          className="overflow-auto max-h-[calc(100vh-380px)]"
           ref={parentRef}
         >
-          <table className="w-full text-[13px]">
-            <thead className="sticky top-0 z-20 bg-default-50 border-b border-default-200">
+          <table className="w-full text-[13px] border-collapse">
+            <thead className="sticky top-0 z-10">
               {table.getHeaderGroups().map((hg) => (
-                <tr key={hg.id}>
+                <tr
+                  key={hg.id}
+                  className="bg-[var(--paper-2)] border-b border-[var(--rule)]"
+                >
                   {hg.headers.map((h) => {
                     const canSort = h.column.getCanSort();
                     const sortDir = h.column.getIsSorted();
-                    const isSelect = h.column.id === '__select';
                     const w = h.column.columnDef.size;
                     return (
                       <th
                         key={h.id}
                         style={w ? { width: w } : undefined}
                         className={[
-                          'px-3 py-2.5 text-left font-semibold text-[10px] uppercase tracking-wider text-default-500 select-none',
-                          isSelect ? 'bg-default-50' : '',
-                          canSort ? 'cursor-pointer hover:text-default-900 group' : '',
+                          'px-3 py-2.5 text-left font-medium text-[11px] uppercase tracking-wider text-[var(--ink-mute)] select-none whitespace-nowrap',
+                          canSort ? 'cursor-pointer hover:text-[var(--ink)] transition-colors' : '',
                         ].join(' ')}
                         onClick={canSort ? h.column.getToggleSortingHandler() : undefined}
                       >
-                        <span className="inline-flex items-center gap-1">
+                        <span className="inline-flex items-center gap-1.5">
                           {flexRender(h.column.columnDef.header, h.getContext())}
                           {canSort && (
-                            <span
-                              className={[
-                                'inline-flex items-center',
-                                sortDir ? 'text-default-900' : 'text-default-300 group-hover:text-default-500',
-                              ].join(' ')}
-                            >
+                            <span className={sortDir ? 'text-[var(--accent)]' : 'text-[var(--ink-faint)]'}>
                               {sortDir === 'asc' ? (
                                 <ArrowUp size={11} strokeWidth={2.5} />
                               ) : sortDir === 'desc' ? (
                                 <ArrowDown size={11} strokeWidth={2.5} />
                               ) : (
-                                <ArrowUpDown size={11} />
+                                <ArrowUpDown size={11} strokeWidth={1.5} />
                               )}
                             </span>
                           )}
@@ -590,12 +560,11 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
               ))}
             </thead>
             <tbody style={{ height: `${virtualizer.getTotalSize()}px`, position: 'relative' }}>
-              {/* loading skeleton on first load only */}
               {isLoading && rowCount === 0 && (
                 <tr>
-                  <td colSpan={allColumns.length} className="text-center py-16">
-                    <div className="flex flex-col items-center gap-2 text-default-500">
-                      <Spinner size="sm" />
+                  <td colSpan={allColumns.length} className="text-center py-20">
+                    <div className="flex flex-col items-center gap-2 text-[var(--ink-mute)]">
+                      <Spinner size="md" />
                       <span className="text-[12px]">Загружаем…</span>
                     </div>
                   </td>
@@ -606,13 +575,7 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
                 <tr>
                   <td colSpan={allColumns.length} className="p-0">
                     <EmptyState
-                      variant={
-                        error
-                          ? 'error'
-                          : hasAnyFilter
-                            ? 'no-results'
-                            : 'no-data'
-                      }
+                      variant={error ? 'error' : hasAnyFilter ? 'no-results' : 'no-data'}
                       errorMessage={(error as Error)?.message}
                       hasFilters={activeFilters > 0}
                       hasSearch={hasSearch}
@@ -636,9 +599,7 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
                     key={row.id}
                     style={{
                       position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      right: 0,
+                      top: 0, left: 0, right: 0,
                       height: `${vr.size}px`,
                       transform: `translateY(${vr.start}px)`,
                       display: 'table',
@@ -646,15 +607,13 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
                       width: '100%',
                     }}
                     className={[
-                      'border-b border-default-100 transition-colors',
+                      'border-b border-[var(--rule-soft)] transition-colors group/row',
                       isSelected
-                        ? 'bg-primary-50/60'
-                        : 'hover:bg-default-50',
+                        ? 'bg-[var(--highlight)]'
+                        : 'hover:bg-[var(--paper-2)]',
                       rowHref ? 'cursor-pointer' : '',
                     ].join(' ')}
                     onClick={(e) => {
-                      // Don't navigate when clicking an interactive control
-                      // inside the row (link, button, checkbox).
                       const tgt = e.target as HTMLElement;
                       if (tgt.closest('a, button, input, [role="button"]')) return;
                       if (rowHref) {
@@ -663,15 +622,17 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
                       }
                     }}
                   >
-                    {row.getVisibleCells().map((cell) => (
+                    {row.getVisibleCells().map((cell, i) => (
                       <td
                         key={cell.id}
                         className={[
-                          'px-3 align-middle',
-                          density === 'compact' ? 'py-1' : 'py-2.5',
-                          cell.column.id === '__select' ? 'bg-inherit' : '',
+                          'px-3 align-middle relative',
+                          density === 'compact' ? 'py-1.5' : 'py-2.5',
                         ].join(' ')}
                       >
+                        {isSelected && i === 0 && (
+                          <span className="absolute left-0 top-0 bottom-0 w-[3px] bg-[var(--accent)]" />
+                        )}
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </td>
                     ))}
@@ -684,54 +645,59 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
       </div>
 
       {/* ========== Pagination ========== */}
-      <div className="flex items-center gap-4 flex-wrap">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
         <Pagination
           total={totalPages}
           page={page}
           onChange={setPage}
           size="sm"
           showControls
-          color="default"
-          classNames={{ wrapper: 'gap-1', item: 'w-8 h-8 min-w-8 text-[12px]', cursor: 'bg-zinc-900 text-white' }}
         />
 
-        <div className="flex-1" />
-
-        <Select
-          size="sm"
-          variant="flat"
-          selectedKeys={new Set([String(pageSize)])}
-          onSelectionChange={(keys) => {
-            const v = Array.from(keys as Set<string>)[0];
-            if (v) setPageSize(parseInt(v, 10));
-          }}
-          aria-label="Размер страницы"
-          className="w-28"
-          classNames={{ trigger: 'h-8 min-h-8 bg-default-100 data-[hover=true]:bg-default-200/70' }}
-        >
-          {pageSizeOptions.map((n) => (
-            <SelectItem key={String(n)}>{n} на стр.</SelectItem>
-          ))}
-        </Select>
+        <div className="flex items-center gap-2">
+          <span className="text-[12.5px] text-[var(--ink-mute)]">На стр.</span>
+          <Select
+            size="sm"
+            variant="bordered"
+            radius="sm"
+            selectedKeys={new Set([String(pageSize)])}
+            onSelectionChange={(keys) => {
+              const v = Array.from(keys as Set<string>)[0];
+              if (v) setPageSize(parseInt(v, 10));
+            }}
+            aria-label="Размер страницы"
+            className="w-28"
+            classNames={{
+              trigger: '!h-8 !min-h-8 !bg-[var(--paper-card)]',
+              value: '!text-[12.5px] !text-[var(--ink)]',
+              selectorIcon: '!text-[var(--ink-mute)]',
+            }}
+          >
+            {pageSizeOptions.map((n) => (
+              <SelectItem key={String(n)} className="!text-[12.5px]">
+                {n}
+              </SelectItem>
+            ))}
+          </Select>
+        </div>
       </div>
 
       {/* ========== Bulk action bar ========== */}
       {selectedRows.length > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[1000] bg-zinc-900 text-white rounded-full shadow-2xl pl-4 pr-2 py-2 flex items-center gap-3 animate-fade-in">
-          <span className="text-[12px] font-semibold tabular-nums">
-            {selectedRows.length} выбрано
-          </span>
-          <Divider orientation="vertical" className="h-5 bg-white/20" />
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[1000] bg-[var(--ink)] text-[var(--paper)] shadow-2xl rounded-lg pl-4 pr-1 py-1.5 flex items-center gap-2 text-[13px]">
+          <span className="font-semibold tabular-nums">{selectedRows.length}</span>
+          <span className="opacity-70">выбрано</span>
+          <span className="w-px h-4 bg-white/20 mx-1" />
           {rowHref && (
             <Button
               size="sm"
               variant="light"
-              startContent={<ExternalLink size={12} />}
+              startContent={<ExternalLink size={12} strokeWidth={2} />}
               onPress={() => {
                 const href = rowHref(selectedRows[0]);
                 if (href) window.open(href, '_blank', 'noopener,noreferrer');
               }}
-              className="text-white data-[hover=true]:bg-white/10"
+              className="!text-[var(--paper)] data-[hover=true]:!bg-white/10"
             >
               Открыть
             </Button>
@@ -739,22 +705,22 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
           <Button
             size="sm"
             variant="light"
-            startContent={<Download size={12} />}
+            startContent={<Download size={12} strokeWidth={2} />}
             onPress={exportCSV}
-            className="text-white data-[hover=true]:bg-white/10"
+            className="!text-[var(--paper)] data-[hover=true]:!bg-white/10"
           >
             Export
           </Button>
-          <Divider orientation="vertical" className="h-5 bg-white/20" />
+          <span className="w-px h-4 bg-white/20 mx-1" />
           <Button
             isIconOnly
             size="sm"
             variant="light"
             onPress={() => setSelected(new Set())}
             aria-label="Снять выделение"
-            className="text-white data-[hover=true]:bg-white/10 w-7 min-w-7"
+            className="!text-[var(--paper)] data-[hover=true]:!bg-white/10"
           >
-            <X size={14} />
+            <X size={13} strokeWidth={2} />
           </Button>
         </div>
       )}

@@ -13,7 +13,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ru" className="light">
-      <body className="h-screen overflow-hidden text-zinc-900 bg-zinc-50 antialiased">
+      <body className="h-screen overflow-hidden text-[var(--ink)] bg-[var(--paper)] antialiased">
         <Providers>
           <div className="flex h-screen">
             <Sidebar />

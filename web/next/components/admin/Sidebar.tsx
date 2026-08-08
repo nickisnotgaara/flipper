@@ -14,7 +14,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useState } from 'react';
-import { Button, Chip, Divider } from '@heroui/react';
+import { Button } from '@heroui/react';
 
 type NavItem = {
   label: string;
@@ -59,20 +59,26 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className="w-60 shrink-0 h-screen sticky top-0 bg-zinc-50 border-r border-zinc-200 flex flex-col">
+    <aside className="w-60 shrink-0 h-screen sticky top-0 bg-[var(--paper-card)] border-r border-[var(--rule)] flex flex-col">
       {/* Brand */}
-      <div className="h-16 flex items-center gap-2.5 px-4 border-b border-zinc-200">
-        <div className="w-8 h-8 rounded-lg bg-zinc-900 text-emerald-400 flex items-center justify-center">
-          <Home size={18} strokeWidth={2.5} />
-        </div>
-        <div>
-          <div className="text-[15px] font-bold tracking-tight leading-none">Flipper</div>
-          <div className="text-[10px] text-zinc-500 mt-0.5">admin panel</div>
-        </div>
+      <div className="px-4 pt-4 pb-3 border-b border-[var(--rule)]">
+        <Link href="/dashboard" className="flex items-center gap-2.5 group">
+          <div className="w-9 h-9 bg-[var(--ink)] rounded-md flex items-center justify-center group-hover:bg-[var(--ink-soft)] transition-colors">
+            <span className="font-display text-[var(--paper)] text-[15px] font-bold leading-none">Ф</span>
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="font-display text-[15px] text-[var(--ink)] font-semibold leading-none">
+              Flipper
+            </div>
+            <div className="text-[11px] text-[var(--ink-mute)] mt-1">
+              Панель управления
+            </div>
+          </div>
+        </Link>
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-1">
+      <nav className="flex-1 overflow-y-auto py-2">
         {NAV.map((item) => {
           const Icon = item.icon;
           const active = isActive(item);
@@ -83,26 +89,27 @@ export default function Sidebar() {
               <div key={item.href}>
                 <Button
                   onPress={() => setTablesOpen((v) => !v)}
-                  variant={subActive ? 'solid' : 'light'}
-                  color={subActive ? 'default' : 'default'}
+                  variant="light"
+                  radius="sm"
                   className={[
-                    'w-full justify-start gap-2.5 h-9 px-2.5 text-[13px] font-medium',
+                    'w-full justify-start gap-2.5 h-9 px-3 !rounded-md text-[13px]',
                     subActive
-                      ? 'bg-zinc-900 text-white data-[hover=true]:bg-zinc-800'
-                      : 'text-zinc-700 data-[hover=true]:bg-zinc-100',
+                      ? '!bg-[var(--ink)] !text-[var(--paper)] data-[hover=true]:!bg-[var(--ink-soft)] font-medium'
+                      : '!text-[var(--ink-soft)] data-[hover=true]:!bg-[var(--paper-2)] data-[hover=true]:!text-[var(--ink)]',
                   ].join(' ')}
-                  startContent={<Icon size={16} />}
+                  startContent={<Icon size={15} strokeWidth={2} />}
                   endContent={
                     <ChevronDown
-                      size={14}
-                      className={['transition-transform', tablesOpen ? 'rotate-180' : ''].join(' ')}
+                      size={13}
+                      strokeWidth={2}
+                      className={['transition-transform opacity-60', tablesOpen ? 'rotate-180' : ''].join(' ')}
                     />
                   }
                 >
                   {item.label}
                 </Button>
                 {tablesOpen && (
-                  <div className="mt-1 ml-[26px] space-y-0.5">
+                  <div className="ml-4 my-0.5 border-l border-[var(--rule)] pl-1">
                     {item.subItems.map((sub) => {
                       const subIsActive = pathname === sub.href;
                       return (
@@ -110,21 +117,18 @@ export default function Sidebar() {
                           key={sub.href}
                           href={sub.href}
                           className={[
-                            'flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[12.5px]',
+                            'flex items-center gap-2 px-3 py-1.5 text-[12.5px] rounded-md transition-colors',
                             subIsActive
-                              ? 'text-zinc-900 font-semibold bg-zinc-100'
-                              : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100',
+                              ? 'text-[var(--ink)] font-medium bg-[var(--paper-2)]'
+                              : 'text-[var(--ink-mute)] hover:text-[var(--ink)] hover:bg-[var(--paper-2)]',
                           ].join(' ')}
                         >
-                          <span
-                            className={[
-                              'w-1.5 h-1.5 rounded-full',
-                              subIsActive ? 'bg-emerald-500' : 'bg-zinc-300',
-                            ].join(' ')}
-                          />
-                          <span className="flex-1">{sub.label}</span>
+                          {subIsActive && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)]" />
+                          )}
+                          <span className="flex-1 truncate">{sub.label}</span>
                           {sub.badge != null && (
-                            <span className="text-[10px] text-zinc-400 font-mono tabular-nums">
+                            <span className="text-[10.5px] text-[var(--ink-faint)] tabular-nums">
                               {fmt(sub.badge)}
                             </span>
                           )}
@@ -142,39 +146,37 @@ export default function Sidebar() {
               key={item.href}
               as={Link}
               href={item.href}
-              variant={active ? 'solid' : 'light'}
+              variant="light"
+              radius="sm"
               className={[
-                'w-full justify-start gap-2.5 h-9 px-2.5 text-[13px] font-medium',
+                'w-full justify-start gap-2.5 h-9 px-3 !rounded-md text-[13px]',
                 active
-                  ? 'bg-zinc-900 text-white data-[hover=true]:bg-zinc-800'
-                  : 'text-zinc-700 data-[hover=true]:bg-zinc-100',
+                  ? '!bg-[var(--ink)] !text-[var(--paper)] data-[hover=true]:!bg-[var(--ink-soft)] font-medium'
+                  : '!text-[var(--ink-soft)] data-[hover=true]:!bg-[var(--paper-2)] data-[hover=true]:!text-[var(--ink)]',
               ].join(' ')}
-              startContent={<Icon size={16} />}
+              startContent={<Icon size={15} strokeWidth={2} />}
             >
               <span className="flex-1 text-left">{item.label}</span>
               {item.badge != null && (
-                <Chip
-                  size="sm"
-                  variant={active ? 'solid' : 'flat'}
+                <span
                   className={[
-                    'h-5 px-1.5 text-[10px] font-mono tabular-nums',
-                    active ? 'bg-white/15 text-white' : 'bg-zinc-100 text-zinc-500',
+                    'text-[10.5px] tabular-nums',
+                    active ? 'text-[var(--paper)] opacity-70' : 'text-[var(--ink-faint)]',
                   ].join(' ')}
                 >
                   {fmt(item.badge)}
-                </Chip>
+                </span>
               )}
             </Button>
           );
         })}
       </nav>
 
-      <Divider />
-
-      {/* Status footer */}
-      <div className="px-4 py-3 flex items-center gap-2 text-[11px] text-zinc-500">
-        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.15)]" />
-        <span>flippercrawl · OK</span>
+      <div className="border-t border-[var(--rule)] px-4 py-3 flex items-center gap-2 text-[12px]">
+        <span className="w-2 h-2 rounded-full bg-[var(--gain)]" />
+        <span className="text-[var(--ink-soft)]">flippercrawl</span>
+        <span className="flex-1" />
+        <span className="text-[var(--gain)] font-medium">OK</span>
       </div>
     </aside>
   );

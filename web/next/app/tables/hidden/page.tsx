@@ -2,18 +2,38 @@
 
 import { useMemo } from 'react';
 import Link from 'next/link';
-import { Chip } from '@heroui/react';
-import { ExternalLink, Image as ImageIcon } from 'lucide-react';
-import DataTable, { type FilterDef } from '@/components/admin/DataTable';
+import { Image as ImageIcon, ExternalLink } from 'lucide-react';
+import DataTable from '@/components/admin/DataTable';
+import type { FilterDef } from '@/components/admin/FilterPanel';
 
 const FILTERS: FilterDef[] = [
-  { key: 'price_min', label: 'Цена от', kind: 'range-min', placeholder: '5 000 000' },
-  { key: 'price_max', label: 'до', kind: 'range-max', placeholder: '30 000 000' },
-  { key: 'rooms', label: 'Комнат', kind: 'multi', options: [
-    { value: '1', label: '1' },
-    { value: '2', label: '2' },
-    { value: '3', label: '3' },
-  ]},
+  {
+    key: 'price_min',
+    label: 'Цена',
+    group: 'Цена',
+    kind: 'range-min',
+    placeholder: '5 000 000',
+    unit: '₽',
+  },
+  {
+    key: 'price_max',
+    label: 'Цена',
+    group: 'Цена',
+    kind: 'range-max',
+    placeholder: '30 000 000',
+    unit: '₽',
+  },
+  {
+    key: 'rooms',
+    label: 'Комнат',
+    group: 'Категории',
+    kind: 'multi',
+    options: [
+      { value: '1', label: '1' },
+      { value: '2', label: '2' },
+      { value: '3', label: '3' },
+    ],
+  },
 ];
 
 function fmt(n: number | null | undefined): string {
@@ -26,11 +46,11 @@ export default function HiddenPage() {
     () => [
       {
         id: 'thumb',
-        header: 'Фото',
+        header: 'фото',
         enableSorting: false,
         cell: ({ row }: any) => (
-          <div className="w-12 h-8 rounded bg-zinc-100 flex items-center justify-center text-zinc-400">
-            <ImageIcon size={14} />
+          <div className="w-9 h-7 border border-[var(--rule)] flex items-center justify-center text-[var(--ink-faint)] bg-[var(--paper-2)]">
+            <ImageIcon size={11} strokeWidth={1.75} />
           </div>
         ),
       },
@@ -40,23 +60,83 @@ export default function HiddenPage() {
         accessorKey: 'external_id',
         cell: ({ row }: any) => (
           <div className="min-w-[200px]">
-            <div className="text-zinc-900 font-medium tabular-nums">#{row.original.external_id}</div>
-            <div className="text-[11px] text-zinc-500">house #{row.original.house_id}</div>
+            <div className="font-mono tabular-nums text-[var(--ink)] font-medium text-[13px]">
+              #{row.original.external_id}
+            </div>
+            <div className="text-[10.5px] text-[var(--ink-faint)] font-mono mt-0.5">
+              house #{row.original.house_id}
+            </div>
           </div>
         ),
       },
-      { id: 'rooms', header: 'Комнат', accessorKey: 'rooms', cell: ({ row }: any) => <span className="tabular-nums">{row.original.rooms ?? '—'}</span> },
-      { id: 'area', header: 'Площадь', accessorKey: 'area', cell: ({ row }: any) => <span className="tabular-nums">{row.original.area ? `${row.original.area} м²` : '—'}</span> },
-      { id: 'price', header: 'Цена', accessorKey: 'price', cell: ({ row }: any) => <span className="tabular-nums font-semibold text-zinc-900">{fmt(row.original.price)}</span> },
-      { id: 'sold_date', header: 'Снято', accessorKey: 'sold_date', cell: ({ row }: any) => <span className="text-[12px] text-zinc-600">{row.original.sold_date || '—'}</span> },
-      { id: 'source', header: 'Источник', accessorKey: 'source', cell: ({ row }: any) => <Chip size="sm" variant="flat" classNames={{ base: 'h-5 px-1.5' }}><span className="text-[10px] uppercase font-semibold tracking-wider">ЦИАН</span></Chip> },
+      {
+        id: 'rooms',
+        header: 'комн',
+        accessorKey: 'rooms',
+        cell: ({ row }: any) => (
+          <span className="font-mono tabular-nums text-[var(--ink)] text-right block w-full">
+            {row.original.rooms ?? '—'}
+          </span>
+        ),
+      },
+      {
+        id: 'area',
+        header: 'площадь',
+        accessorKey: 'area',
+        cell: ({ row }: any) => (
+          <div className="text-right">
+            <span className="font-mono tabular-nums text-[var(--ink)]">
+              {row.original.area ?? '—'}
+            </span>
+            <span className="font-mono text-[10px] text-[var(--ink-faint)] ml-1">м²</span>
+          </div>
+        ),
+      },
+      {
+        id: 'price',
+        header: 'цена, ₽',
+        accessorKey: 'price',
+        cell: ({ row }: any) => (
+          <div className="text-right">
+            <span className="font-mono tabular-nums text-[var(--ink)] font-semibold text-[13px]">
+              {fmt(row.original.price)}
+            </span>
+          </div>
+        ),
+      },
+      {
+        id: 'sold_date',
+        header: 'снято',
+        accessorKey: 'sold_date',
+        cell: ({ row }: any) => (
+          <span className="font-mono tabular-nums text-[12.5px] text-[var(--ink-mute)]">
+            {row.original.sold_date || '—'}
+          </span>
+        ),
+      },
+      {
+        id: 'source',
+        header: 'источник',
+        accessorKey: 'source',
+        cell: ({ row }: any) => (
+          <span className="inline-flex items-center px-1.5 h-5 text-[10px] font-mono uppercase tracking-[0.10em] font-semibold border border-[var(--ink)] bg-[var(--paper-card)] text-[var(--ink)] rounded-[1px]">
+            ЦИАН
+          </span>
+        ),
+      },
       {
         id: 'url',
         header: '',
         enableSorting: false,
         cell: ({ row }: any) => (
-          <Link href={row.original.url || '#'} target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-emerald-600" onClick={(e) => e.stopPropagation()}>
-            <ExternalLink size={14} />
+          <Link
+            href={row.original.url || '#'}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[var(--ink-faint)] hover:text-[var(--accent)] transition-colors"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <ExternalLink size={13} strokeWidth={1.75} />
           </Link>
         ),
       },
@@ -65,12 +145,10 @@ export default function HiddenPage() {
   );
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div>
-        <h1 className="text-[22px] font-bold tracking-tight">Скрытые с фото</h1>
-        <p className="text-[13px] text-zinc-500 mt-0.5">
-          173 536 снятых публикаций с фотографиями · 75% имеют фото
-        </p>
+        <h1 className="page-title">Скрытые с фото</h1>
+        <p className="page-sub">Снятые публикации с фотографиями</p>
       </div>
       <DataTable
         name="hidden"
@@ -79,6 +157,7 @@ export default function HiddenPage() {
         initialSort={[{ id: 'sold_date', desc: true }]}
         totalLabel="скрытых"
         pageSize={50}
+        rowHref={(row) => row.url || null}
       />
     </div>
   );

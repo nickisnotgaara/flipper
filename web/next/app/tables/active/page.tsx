@@ -3,7 +3,7 @@
 import { useMemo } from 'react';
 import Link from 'next/link';
 import { Chip } from '@heroui/react';
-import { ExternalLink, Image as ImageIcon, AlertTriangle } from 'lucide-react';
+import { ExternalLink, Stamp } from 'lucide-react';
 import DataTable from '@/components/admin/DataTable';
 import type { FilterDef } from '@/components/admin/FilterPanel';
 
@@ -84,60 +84,79 @@ function fmt(n: number | null | undefined): string {
   return n.toLocaleString('ru-RU');
 }
 
+// "Freshness" stamp — color a small badge by days on market.
+function daysTone(d: number | null | undefined): { color: string; label: string } {
+  if (d == null) return { color: 'text-zinc-400', label: '—' };
+  if (d <= 7) return { color: 'text-emerald-700', label: 'свежее' };
+  if (d <= 30) return { color: 'text-amber-700', label: 'норма' };
+  if (d <= 90) return { color: 'text-orange-700', label: 'залежалое' };
+  return { color: 'text-rose-800', label: 'старое' };
+}
+
 export default function ActivePage() {
   const columns = useMemo(
     () => [
       {
         id: 'address',
-        header: 'Адрес',
+        header: 'Адрес / район',
         accessorKey: 'district',
         cell: ({ row }: any) => (
           <div className="min-w-[220px]">
-            <div className="text-zinc-900 font-medium truncate">{row.original.title || '—'}</div>
-            <div className="text-[11px] text-zinc-500 truncate">
+            <div className="text-[var(--ink)] font-medium text-[13px] leading-tight truncate">
+              {row.original.title || '—'}
+            </div>
+            <div className="text-[11px] text-[var(--ink-mute)] font-mono mt-0.5 truncate">
               {row.original.district || '—'}
-              {row.original.okrug ? ` · ${row.original.okrug}` : ''}
+              {row.original.okrug ? <span className="text-[var(--ink-faint)]"> · {row.original.okrug}</span> : null}
             </div>
           </div>
         ),
       },
       {
         id: 'rooms',
-        header: 'Комнат',
+        header: 'комн',
         accessorKey: 'rooms',
         cell: ({ row }: any) => (
-          <span className="tabular-nums text-zinc-700">{row.original.rooms ?? '—'}</span>
+          <span className="font-mono tabular-nums text-[var(--ink)] text-right block w-full">
+            {row.original.rooms ?? '—'}
+          </span>
         ),
       },
       {
         id: 'area',
-        header: 'Площадь',
+        header: 'площадь',
         accessorKey: 'area',
         cell: ({ row }: any) => (
-          <span className="tabular-nums text-zinc-700">
-            {row.original.area ? `${row.original.area} м²` : '—'}
-          </span>
+          <div className="text-right">
+            <span className="font-mono tabular-nums text-[var(--ink)]">
+              {row.original.area ?? '—'}
+            </span>
+            <span className="font-mono text-[10px] text-[var(--ink-faint)] ml-1">м²</span>
+          </div>
         ),
       },
       {
         id: 'floor_current',
-        header: 'Этаж',
+        header: 'этаж',
         accessorFn: (r: any) => r.floor_current,
         cell: ({ row }: any) => (
-          <span className="tabular-nums text-zinc-700">
+          <div className="text-right font-mono tabular-nums text-[var(--ink-soft)] text-[12.5px]">
             {row.original.floor_current ?? '—'}
-            {row.original.floor_total ? ` / ${row.original.floor_total}` : ''}
-          </span>
+            <span className="text-[var(--ink-faint)]"> / </span>
+            {row.original.floor_total ?? '—'}
+          </div>
         ),
       },
       {
         id: 'price',
-        header: '₽',
+        header: 'цена, ₽',
         accessorKey: 'price',
         cell: ({ row }: any) => (
-          <span className="tabular-nums text-zinc-900 font-semibold">
-            {fmt(row.original.price)}
-          </span>
+          <div className="text-right">
+            <div className="font-mono tabular-nums text-[var(--ink)] font-semibold text-[13px]">
+              {fmt(row.original.price)}
+            </div>
+          </div>
         ),
       },
       {
@@ -145,50 +164,55 @@ export default function ActivePage() {
         header: '₽/м²',
         accessorKey: 'price_per_m2',
         cell: ({ row }: any) => (
-          <span className="tabular-nums text-zinc-700">
-            {row.original.price_per_m2 ? fmt(Math.round(row.original.price_per_m2)) : '—'}
-          </span>
+          <div className="text-right">
+            <span className="font-mono tabular-nums text-[var(--ink-soft)] text-[12.5px]">
+              {row.original.price_per_m2 ? fmt(Math.round(row.original.price_per_m2)) : '—'}
+            </span>
+          </div>
         ),
       },
       {
         id: 'days_in_exposition',
-        header: 'Дней',
+        header: 'дней',
         accessorKey: 'days_in_exposition',
         cell: ({ row }: any) => {
           const d = row.original.days_in_exposition;
-          const color = d != null && d > 60 ? 'warning' : d != null && d > 90 ? 'danger' : 'default';
+          const tone = daysTone(d);
           return (
-            <Chip size="sm" variant="flat" color={color as any} classNames={{ base: 'h-5 px-1.5' }}>
-              <span className="text-[11px] tabular-nums font-semibold">{d ?? '—'}</span>
-            </Chip>
+            <div className="text-right">
+              <span className={`font-mono tabular-nums text-[12.5px] font-semibold ${tone.color}`}>
+                {d ?? '—'}
+              </span>
+            </div>
           );
         },
       },
       {
         id: 'renovation',
-        header: 'Ремонт',
+        header: 'ремонт',
         accessorKey: 'renovation',
         cell: ({ row }: any) => (
-          <span className="text-[12px] text-zinc-600">{row.original.renovation || '—'}</span>
+          <span className="text-[12px] text-[var(--ink-mute)]">{row.original.renovation || '—'}</span>
         ),
       },
       {
         id: 'source',
-        header: 'Источник',
+        header: 'источник',
         accessorKey: 'source',
         cell: ({ row }: any) => {
           const isAvans = row.original.source === 'avans';
           return (
-            <Chip
-              size="sm"
-              variant="flat"
-              color={isAvans ? 'warning' : 'success'}
-              classNames={{ base: 'h-5 px-1.5' }}
+            <span
+              className={[
+                'inline-flex items-center gap-1 px-1.5 h-5 text-[10px] font-mono uppercase tracking-[0.10em] font-semibold border rounded-[1px]',
+                isAvans
+                  ? 'border-[var(--gold)] text-[var(--gold)] bg-[var(--gold-soft)]'
+                  : 'border-[var(--ink)] text-[var(--ink)] bg-[var(--paper-card)]',
+              ].join(' ')}
             >
-              <span className="text-[10px] uppercase font-semibold tracking-wider">
-                {isAvans ? 'Аванс' : 'ЦИАН'}
-              </span>
-            </Chip>
+              {isAvans && <Stamp size={9} strokeWidth={2} />}
+              {isAvans ? 'Аванс' : 'ЦИАН'}
+            </span>
           );
         },
       },
@@ -201,10 +225,10 @@ export default function ActivePage() {
             href={row.original.url || '#'}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-zinc-400 hover:text-emerald-600"
+            className="text-[var(--ink-faint)] hover:text-[var(--accent)] transition-colors"
             onClick={(e) => e.stopPropagation()}
           >
-            <ExternalLink size={14} />
+            <ExternalLink size={13} strokeWidth={1.75} />
           </Link>
         ),
       },
@@ -213,12 +237,10 @@ export default function ActivePage() {
   );
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div>
-        <h1 className="text-[22px] font-bold tracking-tight">Активные объявления</h1>
-        <p className="text-[13px] text-zinc-500 mt-0.5">
-          5 227 живых объявлений · server-side pagination, sort, search, filters
-        </p>
+        <h1 className="page-title">Активные объявления</h1>
+        <p className="page-sub">Живые объявления с ЦИАН и авансовые сигналы</p>
       </div>
       <DataTable
         name="active"

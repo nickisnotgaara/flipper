@@ -1,9 +1,7 @@
 'use client';
 
-import { Button, Chip } from '@heroui/react';
-import { X } from 'lucide-react';
-import type { FilterDef } from './FilterPanel';
-import { describeValue } from './FilterPanel';
+import { Chip, Button } from '@heroui/react';
+import { describeValue, type FilterDef } from './FilterPanel';
 
 type Params = Record<string, string>;
 
@@ -15,15 +13,13 @@ type Props = {
 };
 
 /**
- * Renders one chip per active filter. For `multi` we explode the CSV
- * into N separate chips so the user can remove individual values
- * (e.g. "Комнат 2" without also dropping "Комнат 3").
- *
- * `range-min`/`range-max` are rendered as a single chip per axis that
- * mentions both ends, e.g. "Цена 5М — 15М".
+ * Active filter chips. Each chip has an × to remove that filter.
+ * Range filters (min/max pair) collapse into a single chip.
+ * Multi filters explode into one chip per selected value so the user
+ * can drop just one option (e.g. "Комнат 2" without also dropping "3").
  */
 export default function ActiveFilterChips({ filters, params, onChange, onReset }: Props) {
-  const chips: Array<{ key: string; subKey?: string; label: string; onRemove: () => void }> = [];
+  const chips: Array<{ key: string; label: string; onRemove: () => void }> = [];
 
   for (const f of filters) {
     const v = params[f.key];
@@ -34,7 +30,6 @@ export default function ActiveFilterChips({ filters, params, onChange, onReset }
       list.forEach((val, i) => {
         chips.push({
           key: `${f.key}-${i}`,
-          subKey: val,
           label: `${f.label}: ${describeValue(f, val)}`,
           onRemove: () => {
             const next = list.filter((_, j) => j !== i);
@@ -46,7 +41,6 @@ export default function ActiveFilterChips({ filters, params, onChange, onReset }
     }
 
     if (f.kind === 'range-min' || f.kind === 'range-max') {
-      // Pair up _min / _max into one chip per axis.
       if (f.key.endsWith('_min')) {
         const col = f.key.slice(0, -4);
         const partner = filters.find((x) => x.key === `${col}_max`);
@@ -63,11 +57,9 @@ export default function ActiveFilterChips({ filters, params, onChange, onReset }
           },
         });
       }
-      // skip _max (handled by _min partner)
       continue;
     }
 
-    // toggle / single
     chips.push({
       key: f.key,
       label: `${f.label}: ${describeValue(f, v)}`,
@@ -79,9 +71,6 @@ export default function ActiveFilterChips({ filters, params, onChange, onReset }
 
   return (
     <div className="flex items-center gap-1.5 flex-wrap">
-      <span className="text-[11px] text-default-500 font-semibold uppercase tracking-wider mr-1">
-        Фильтры
-      </span>
       {chips.map((c) => (
         <Chip
           key={c.key}
@@ -90,9 +79,9 @@ export default function ActiveFilterChips({ filters, params, onChange, onReset }
           color="primary"
           onClose={c.onRemove}
           classNames={{
-            base: 'h-6 px-1.5 bg-primary-50',
-            content: 'text-[11px] text-primary-700 font-medium pl-1 pr-0',
-            closeButton: 'ml-1 mr-0.5 w-4 h-4 min-w-4 text-primary-400 data-[hover=true]:bg-primary-100 data-[hover=true]:text-primary-700',
+            base: 'h-7',
+            content: '!text-[12px] !font-medium !pl-1 !pr-0.5',
+            closeButton: '!ml-1 !mr-0.5 !text-[var(--accent-ink)] data-[hover=true]:!bg-[var(--accent-soft)]',
           }}
         >
           {c.label}
@@ -102,9 +91,9 @@ export default function ActiveFilterChips({ filters, params, onChange, onReset }
         size="sm"
         variant="light"
         onPress={onReset}
-        className="text-default-500 data-[hover=true]:text-default-900 h-6 px-2 min-w-0 text-[11px]"
+        className="!h-7 !px-2 !min-w-0 !text-[12px] !text-[var(--ink-mute)] data-[hover=true]:!text-[var(--accent)]"
       >
-        Сбросить все
+        Сбросить
       </Button>
     </div>
   );
@@ -115,8 +104,8 @@ function formatRangeLabel(f: FilterDef, minV: string | undefined, maxV: string |
   const fmt = (n: string) => {
     const num = Number(n);
     if (Number.isNaN(num)) return n;
-    if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(num % 1_000_000 === 0 ? 0 : 1)}М`;
-    if (num >= 1_000) return `${(num / 1_000).toFixed(0)}к`;
+    if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(num % 1_000_000 === 0 ? 0 : 1)} млн`;
+    if (num >= 1_000) return `${(num / 1_000).toFixed(0)} тыс`;
     return String(num);
   };
   const name =
@@ -127,8 +116,7 @@ function formatRangeLabel(f: FilterDef, minV: string | undefined, maxV: string |
         : f.group === 'Срок' || f.label.toLowerCase().includes('дн')
           ? 'Дней'
           : f.label;
-  const unit = f.unit || '';
-  if (minV && maxV) return `${name} ${fmt(minV)} — ${fmt(maxV)}${unit ? ' ' + unit : ''}`;
-  if (minV) return `${name} от ${fmt(minV)}${unit ? ' ' + unit : ''}`;
-  return `${name} до ${fmt(maxV!)}${unit ? ' ' + unit : ''}`;
+  if (minV && maxV) return `${name} ${fmt(minV)} — ${fmt(maxV)}`;
+  if (minV) return `${name} от ${fmt(minV)}`;
+  return `${name} до ${fmt(maxV!)}`;
 }
