@@ -36,7 +36,7 @@ from typing import Optional
 from dataclasses import dataclass
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -51,8 +51,9 @@ sys.path.insert(0, str(ROOT))
 
 from packages.flipper_db import (
     CianSource,
-    init_engine,
+    get_engine,
     get_session_factory,
+    init_engine,
 )  # noqa: E402
 
 WEB_DIR = Path(__file__).resolve().parent
@@ -1803,28 +1804,48 @@ _TABLE_CONFIGS = {
         "source_filter": "source='cian_active'",
         "select": "id, source, external_id, url, price, price_per_m2, area, rooms, "
                   "floor_current, floor_total, district, okrug, metro_station, metro_walk_time, "
-                  "renovation, days_in_exposition, title, publish_date, filter_id, house_id",
-        "search_cols": ["title", "address", "district", "okrug", "metro_station", "external_id"],
+                  "renovation, days_in_exposition, "
+                  "CASE WHEN rooms IS NULL OR rooms = 0 "
+                  "  THEN 'Студия ' || COALESCE(area::text, '') || ' м²' "
+                  "  ELSE rooms::text || '-к квартира ' || COALESCE(area::text, '') || ' м²' "
+                  "END AS title, "
+                  "publish_date, filter_id, house_id",
+        "search_cols": ["external_id", "district", "okrug", "metro_station", "raw_data"],
     },
     "sold": {
         "table": "sold_ads",
         "source_filter": "source='cian_active'",
         "select": "id, source, external_id, url, price, price_per_m2, area, rooms, "
-                  "sold_date, days_in_exposition, title, house_id",
-        "search_cols": ["title", "address", "external_id"],
+                  "sold_date, exposition_days AS days_in_exposition, "
+                  "CASE WHEN rooms IS NULL OR rooms = 0 "
+                  "  THEN 'Студия ' || COALESCE(area::text, '') || ' м²' "
+                  "  ELSE rooms::text || '-к квартира ' || COALESCE(area::text, '') || ' м²' "
+                  "END AS title, "
+                  "house_id",
+        "search_cols": ["external_id", "raw_data"],
     },
     "hidden": {
         "table": "sold_ads",
         "source_filter": "source='cian_deactivated'",
-        "select": "id, source, external_id, url, price, area, rooms, sold_date, house_id",
-        "search_cols": ["address", "external_id"],
+        "select": "id, source, external_id, url, price, price_per_m2, area, rooms, "
+                  "sold_date, exposition_days AS days_in_exposition, "
+                  "CASE WHEN rooms IS NULL OR rooms = 0 "
+                  "  THEN 'Студия ' || COALESCE(area::text, '') || ' м²' "
+                  "  ELSE rooms::text || '-к квартира ' || COALESCE(area::text, '') || ' м²' "
+                  "END AS title, "
+                  "house_id",
+        "search_cols": ["external_id", "raw_data"],
     },
     "houses": {
         "table": "houses",
         "source_filter": None,  # all sources
-        "select": "id, source, address, street, house_num, year, type, levels, "
-                  "series, lat, lng, active_count, deactivated_count",
-        "search_cols": ["address", "street", "house_num", "series"],
+        "select": "id, source, address, street, house_num, "
+                  "year_built AS year, building_type AS type, levels, "
+                  "series, lat, lng, "
+                  "(SELECT COUNT(*) FROM active_ads WHERE house_id = houses.id) AS active_count, "
+                  "(SELECT COUNT(*) FROM sold_ads WHERE house_id = houses.id) AS deactivated_count",
+        "search_cols": ["address", "street", "house_num", "series", "external_house_id"],
+        "stats_cols": (),  # houses have no price/area
     },
 }
 
@@ -1879,7 +1900,15 @@ async def _fetch_table_rows(name: str, params: dict) -> dict:
         sort = None
 
     where_clauses = []
-    where_params: list = []
+    # SA 2.0 async + asyncpg requires named-param placeholders (:name) with a
+    # dict. The legacy "$1, $2, ..." style with a positional list was
+    # mis-parsed as executemany rows, so we switched to explicit names.
+    where_params: dict = {}
+    _n = [0]  # counter for generating unique param names
+
+    def _p():
+        _n[0] += 1
+        return f"p{_n[0]}"
 
     if cfg["source_filter"]:
         where_clauses.append(cfg["source_filter"])
@@ -1907,12 +1936,14 @@ async def _fetch_table_rows(name: str, params: dict) -> dict:
     for mn, mx, col in range_filters.get(name, []):
         v = _parse_int(params.get(mn))
         if v is not None:
-            where_clauses.append(f"{col} >= ${len(where_params) + 1}")
-            where_params.append(v)
+            pk = _p()
+            where_clauses.append(f"{col} >= :{pk}")
+            where_params[pk] = v
         v = _parse_int(params.get(mx))
         if v is not None:
-            where_clauses.append(f"{col} <= ${len(where_params) + 1}")
-            where_params.append(v)
+            pk = _p()
+            where_clauses.append(f"{col} <= :{pk}")
+            where_params[pk] = v
 
     # rooms multi-select (CSV)
     if name in ("active", "sold", "hidden"):
@@ -1921,10 +1952,11 @@ async def _fetch_table_rows(name: str, params: dict) -> dict:
             try:
                 rlist = [int(r) for r in rooms.split(",") if r]
                 if rlist:
-                    where_clauses.append(
-                        f"rooms = ANY(${len(where_params) + 1}::int[])"
-                    )
-                    where_params.append(rlist)
+                    pk = _p()
+                    # Note the space before `::` — the `::` cast operator would
+                    # otherwise swallow our `:p1` named placeholder.
+                    where_clauses.append(f"rooms = ANY(:{pk} ::int[])")
+                    where_params[pk] = rlist
             except ValueError:
                 pass
 
@@ -1934,10 +1966,9 @@ async def _fetch_table_rows(name: str, params: dict) -> dict:
         if sources:
             slist = [s.strip() for s in sources.split(",") if s.strip()]
             if slist:
-                where_clauses.append(
-                    f"source = ANY(${len(where_params) + 1}::text[])"
-                )
-                where_params.append(slist)
+                pk = _p()
+                where_clauses.append(f"source = ANY(:{pk} ::text[])")
+                where_params[pk] = slist
 
     # Full-text search (case-insensitive contains) — search across configured cols.
     # We use ILIKE on a single concatenated text. Cheap at 5k rows; for 200k
@@ -1945,10 +1976,12 @@ async def _fetch_table_rows(name: str, params: dict) -> dict:
     if q:
         qcol_parts = []
         for c in cfg["search_cols"]:
+            # json columns need an explicit ::text cast (raw_data is json)
             qcol_parts.append(f"COALESCE({c}::text, '')")
         concat = " || ' ' || ".join(qcol_parts)
-        where_clauses.append(f"({concat}) ILIKE ${len(where_params) + 1}")
-        where_params.append(f"%{q}%")
+        pk = _p()
+        where_clauses.append(f"({concat}) ILIKE :{pk}")
+        where_params[pk] = f"%{q}%"
 
     where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
     sort_sql = f" ORDER BY {sort} {order.upper()}, id {order.upper()}" if sort else " ORDER BY id DESC"
@@ -1970,14 +2003,23 @@ async def _fetch_table_rows(name: str, params: dict) -> dict:
         cols = list(result.keys())
         rows = [dict(zip(cols, r)) for r in result.fetchall()]
 
-        # Simple stats (count + median-ish)
-        stats_sql = f"SELECT COUNT(*) AS n, COALESCE(AVG(price), 0) AS avg_p, COALESCE(AVG(area), 0) AS avg_a FROM {cfg['table']}{where_sql}"
+        # Simple stats (count + median-ish). Houses have no price/area,
+        # so we look up the stats columns per-config.
+        stats_cols = cfg.get("stats_cols", ("price", "area"))
+        stats_select = ", ".join(
+            [f"COUNT(*) AS n"]
+            + [f"COALESCE(AVG({c}), 0) AS avg_{c}" for c in stats_cols]
+        )
+        stats_sql = f"SELECT {stats_select} FROM {cfg['table']}{where_sql}"
         stats_row = await conn.execute(_text(stats_sql), where_params)
         s = stats_row.fetchone()
+        # s[0] = count, s[1..] = avg_<col>; may be missing if stats_cols is empty
+        avg_price = float(s[1]) if s and len(s) > 1 and s[1] is not None else 0
+        avg_area = float(s[2]) if s and len(s) > 2 and s[2] is not None else 0
         stats = {
             "count": total or 0,
-            "avg_price": float(s[1]) if s and s[1] is not None else 0,
-            "avg_area": float(s[2]) if s and s[2] is not None else 0,
+            "avg_price": avg_price,
+            "avg_area": avg_area,
         }
 
     # Serialize datetimes/dates to ISO strings
