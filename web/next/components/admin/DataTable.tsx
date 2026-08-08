@@ -7,7 +7,7 @@ import {
   flexRender,
   type ColumnDef,
   type SortingState,
-  type ColumnFiltersState,
+  type Row,
 } from '@tanstack/react-table';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useQuery } from '@tanstack/react-query';
@@ -15,50 +15,61 @@ import {
   Spinner,
   Button,
   Input,
+  Checkbox,
   Select,
   SelectItem,
   Pagination,
+  Dropdown,
+  DropdownTrigger,
+  DropdownMenu,
+  DropdownItem,
+  Tooltip,
+  Divider,
 } from '@heroui/react';
-import { ArrowUp, ArrowDown, ArrowUpDown, Search, X, Download } from 'lucide-react';
+import {
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
+  Search,
+  X,
+  Download,
+  Sliders,
+  SlidersHorizontal,
+  RefreshCcw,
+  ExternalLink,
+  Rows3,
+} from 'lucide-react';
+import FilterPanel, { countActiveFilters, type FilterDef } from './FilterPanel';
+export type { FilterDef };
+import ActiveFilterChips from './ActiveFilterChips';
+import ColumnVisibilityMenu from './ColumnVisibilityMenu';
+import EmptyState from './EmptyState';
 
 // ----------------------------------------------------------------
-// Generic DataTable
+// Generic DataTable — v2
 // ----------------------------------------------------------------
 
 export type DataTableProps<T extends Record<string, any>> = {
   /** table name on the API (e.g. "active", "sold", "hidden", "houses") */
   name: string;
   columns: ColumnDef<T, any>[];
-  /** initial sort */
   initialSort?: SortingState;
-  /** filter chip config — rendered above the table */
   filters?: FilterDef[];
-  /** page size (default 50) */
   pageSize?: number;
-  /** query alias: /api/tables/{name}? */
+  pageSizeOptions?: number[];
   queryParams?: Record<string, string>;
-  /** API base — defaults to NEXT_PUBLIC_API_BASE or 127.0.0.1:8000 */
   apiBase?: string;
-  /** total label, e.g. "объявлений" */
   totalLabel?: string;
-};
-
-export type FilterDef = {
-  /** query-param key, e.g. "rooms", "price_min" */
-  key: string;
-  label: string;
-  /** UI kind */
-  kind: 'multi' | 'range-min' | 'range-max' | 'toggle' | 'select';
-  /** options for `multi` and `select` kinds */
-  options?: { value: string; label: string }[];
-  /** for `toggle` */
-  toggleOn?: string;
-  /** placeholder for range inputs */
-  placeholder?: string;
+  /** where clicking a row's primary id sends the user (cross-link) */
+  rowHref?: (row: T) => string | null;
+  /** column id of the "primary" identifier shown in the row URL/href */
+  idKey?: string;
 };
 
 const DEFAULT_API_BASE =
   process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:8000';
+
+const DEFAULT_PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 
 // ---- Local mock fallback (so the UI works when API is down) ---------
 
@@ -105,14 +116,12 @@ function getMockData(name: string, queryParams: Record<string, string>) {
   const m = MOCK[name] || { rows: [], total: 0 };
   let rows = m.rows.slice();
 
-  // Apply client-side search (since we can't SQL this)
   const q = (queryParams.q || '').toLowerCase();
   if (q) {
     rows = rows.filter((r) =>
       Object.values(r).some((v) => String(v).toLowerCase().includes(q)),
     );
   }
-  // Apply client-side filters
   for (const [k, v] of Object.entries(queryParams)) {
     if (!v) continue;
     if (k === 'rooms') {
@@ -145,93 +154,44 @@ function getMockData(name: string, queryParams: Record<string, string>) {
   };
 }
 
-// ---- Filter chip ---------------------------------------------------------
-
-function FilterChip({
-  def,
-  value,
-  onChange,
-}: {
-  def: FilterDef;
-  value: string | undefined;
-  onChange: (v: string | undefined) => void;
-}) {
-  if (def.kind === 'multi' && def.options) {
-    const active = (value || '').split(',').filter(Boolean);
-    return (
-      <Select
-        size="sm"
-        variant="flat"
-        selectionMode="multiple"
-        selectedKeys={new Set(active)}
-        onSelectionChange={(keys) => {
-          const arr = Array.from(keys as Set<string>);
-          onChange(arr.length ? arr.join(',') : undefined);
-        }}
-        className="min-w-[120px]"
-        classNames={{ trigger: 'h-8 min-h-8 bg-zinc-100 data-[hover=true]:bg-zinc-50' }}
-        placeholder={def.label}
-      >
-        {def.options.map((o) => (
-          <SelectItem key={o.value}>{o.label}</SelectItem>
-        ))}
-      </Select>
-    );
-  }
-  if (def.kind === 'range-min' || def.kind === 'range-max') {
-    return (
-      <Input
-        size="sm"
-        type="number"
-        variant="flat"
-        value={value || ''}
-        onValueChange={(v) => onChange(v || undefined)}
-        placeholder={def.placeholder || def.label}
-        classNames={{
-          base: 'w-24',
-          inputWrapper: 'h-8 min-h-8 bg-zinc-100 data-[hover=true]:bg-zinc-50',
-        }}
-      />
-    );
-  }
-  if (def.kind === 'toggle') {
-    const on = value === (def.toggleOn || 'true');
-    return (
-      <Button
-        size="sm"
-        variant={on ? 'solid' : 'flat'}
-        color={on ? 'success' : 'default'}
-        onPress={() => onChange(on ? undefined : def.toggleOn || 'true')}
-        className={on ? '' : 'bg-zinc-100 text-zinc-700 data-[hover=true]:bg-zinc-50'}
-      >
-        {def.label}
-      </Button>
-    );
-  }
-  return null;
-}
-
-// ---- Main component ------------------------------------------------------
+// ----------------------------------------------------------------
 
 export default function DataTable<T extends Record<string, any>>(props: DataTableProps<T>) {
   const {
     name,
-    columns,
+    columns: userColumns,
     initialSort = [],
     filters = [],
-    pageSize = 50,
+    pageSize: initialPageSize = 50,
+    pageSizeOptions = DEFAULT_PAGE_SIZE_OPTIONS,
     queryParams: initialParams = {},
     apiBase = DEFAULT_API_BASE,
     totalLabel = 'строк',
+    rowHref,
+    idKey = 'id',
   } = props;
 
-  // URL state — search + filters + sort + page all live in the query string.
   const [params, setParams] = useState<Record<string, string>>(initialParams);
   const [sort, setSort] = useState<SortingState>(initialSort);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(initialPageSize);
   const [selected, setSelected] = useState<Set<string | number>>(new Set());
+  const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>({});
+  const [density, setDensity] = useState<'comfortable' | 'compact'>('comfortable');
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [searchInput, setSearchInput] = useState(params.q || '');
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
 
-  // Build query for TanStack Query
+  // Debounce the search input into the actual query param. 250ms
+  // is enough to feel instant while not firing on every keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setParams((p) => ({ ...p, q: searchInput || undefined }));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  // Query
   const queryKey = useMemo(() => {
     const q: Record<string, string> = { ...params };
     if (sort.length) {
@@ -243,10 +203,9 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
     return ['table', name, q] as const;
   }, [name, params, sort, page, pageSize]);
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, isFetching, error, refetch } = useQuery({
     queryKey,
     queryFn: async () => {
-      const qs = new URLSearchParams();
       const flat: Record<string, string> = { ...params };
       if (sort.length) {
         flat.sort = String(sort[0].id);
@@ -254,6 +213,7 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
       }
       flat.page = String(page);
       flat.page_size = String(pageSize);
+      const qs = new URLSearchParams();
       for (const [k, v] of Object.entries(flat)) {
         if (v != null && v !== '') qs.set(k, v);
       }
@@ -270,41 +230,100 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
           stats: { count: number; avg_price: number; avg_area: number };
         };
       } catch (e) {
-        // Offline / API down → use mock so the UI is still navigable
         return getMockData(name, { ...params, ...flat }) as any;
       }
     },
     staleTime: 15_000,
   });
 
-  // Build TanStack table
+  // Reset to page 1 when filters/sort/pageSize change
+  useEffect(() => {
+    setPage(1);
+  }, [params, sort, pageSize]);
+
+  // Build the columns list — prepend a checkbox column for bulk select.
+  const allColumns = useMemo<ColumnDef<T, any>[]>(() => {
+    const selCol: ColumnDef<T, any> = {
+      id: '__select',
+      header: ({ table }) => (
+        <Checkbox
+          size="sm"
+          radius="sm"
+          aria-label="Выбрать все на странице"
+          isSelected={table.getRowModel().rows.length > 0 && table.getRowModel().rows.every((r) => selected.has(r.original[idKey]))}
+          isIndeterminate={
+            table.getRowModel().rows.some((r) => selected.has(r.original[idKey])) &&
+            !table.getRowModel().rows.every((r) => selected.has(r.original[idKey]))
+          }
+          onValueChange={(v) => {
+            setSelected((prev) => {
+              const next = new Set(prev);
+              for (const r of table.getRowModel().rows) {
+                const k = r.original[idKey];
+                if (v) next.add(k);
+                else next.delete(k);
+              }
+              return next;
+            });
+          }}
+          classNames={{ wrapper: 'before:border-default-300' }}
+        />
+      ),
+      cell: ({ row }) => (
+        <Checkbox
+          size="sm"
+          radius="sm"
+          aria-label="Выбрать строку"
+          isSelected={selected.has(row.original[idKey])}
+          onValueChange={(v) => {
+            setSelected((prev) => {
+              const next = new Set(prev);
+              const k = row.original[idKey];
+              if (v) next.add(k);
+              else next.delete(k);
+              return next;
+            });
+          }}
+          classNames={{ wrapper: 'before:border-default-300' }}
+        />
+      ),
+      enableSorting: false,
+      size: 36,
+    };
+    return [selCol, ...userColumns];
+  }, [userColumns, selected, idKey]);
+
   const table = useReactTable<T>({
     data: data?.rows ?? [],
-    columns,
-    state: { sorting: sort },
+    columns: allColumns,
+    state: {
+      sorting: sort,
+      columnVisibility: { ...columnVisibility, __select: true },
+    },
     onSortingChange: setSort,
     manualSorting: true,
     manualFiltering: true,
     manualPagination: true,
     getCoreRowModel: getCoreRowModel(),
+    getRowId: (row: any, idx) => String(row[idKey] ?? idx),
   });
 
   // Virtualizer
   const parentRef = useRef<HTMLDivElement>(null);
+  const rowHeight = density === 'compact' ? 36 : 48;
   const virtualizer = useVirtualizer({
     count: data?.rows.length ?? 0,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 44,
-    overscan: 8,
+    estimateSize: () => rowHeight,
+    overscan: 10,
   });
 
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-
-  // Reset to page 1 when filters/sort change
-  useEffect(() => {
-    setPage(1);
-  }, [params, sort]);
+  const activeFilters = countActiveFilters(filters, params);
+  const hasSearch = !!params.q;
+  const hasAnyFilter = hasSearch || activeFilters > 0;
+  const rowCount = data?.rows.length ?? 0;
 
   const updateParam = useCallback((key: string, value: string | undefined) => {
     setParams((p) => {
@@ -317,6 +336,7 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
 
   const resetAll = useCallback(() => {
     setParams({});
+    setSearchInput('');
     setSort(initialSort);
     setPage(1);
   }, [initialSort]);
@@ -326,127 +346,241 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
     window.open(`${apiBase}/api/tables/${name}/export?${qs.toString()}`, '_blank');
   }, [apiBase, name, params]);
 
-  const hasActive = Object.values(params).some((v) => v);
+  // -- keyboard shortcut: `/` focuses search
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === '/' && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        const el = document.getElementById('dt-search-input') as HTMLInputElement | null;
+        el?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // -- bulk actions: open all selected on the map (cross-link via rowHref)
+  const selectedRows = useMemo(() => {
+    if (selected.size === 0) return [];
+    return (data?.rows ?? []).filter((r: any) => selected.has(r[idKey]));
+  }, [data, selected, idKey]);
 
   return (
-    <div className="space-y-4">
-      {/* Search + actions bar */}
+    <div className="space-y-3">
+      {/* ========== Toolbar ========== */}
       <div className="flex items-center gap-2 flex-wrap">
+        {/* Search */}
         <Input
-          value={params.q || ''}
-          onValueChange={(v) => updateParam('q', v || undefined)}
+          id="dt-search-input"
+          value={searchInput}
+          onValueChange={setSearchInput}
+          onFocus={() => setSearchFocused(true)}
+          onBlur={() => setSearchFocused(false)}
           placeholder="Поиск по адресу, ID, району…"
           size="sm"
           variant="flat"
-          startContent={<Search size={14} className="text-zinc-400" />}
+          startContent={<Search size={14} className="text-default-400" />}
           endContent={
-            params.q ? (
+            searchInput ? (
               <Button
                 isIconOnly
                 size="sm"
                 radius="full"
                 variant="light"
-                onPress={() => updateParam('q', undefined)}
+                onPress={() => setSearchInput('')}
                 aria-label="Очистить"
-                className="w-6 h-6 min-w-6 text-zinc-400 data-[hover=true]:text-zinc-700 data-[hover=true]:bg-zinc-100"
+                className="w-5 h-5 min-w-5 text-default-500 data-[hover=true]:bg-default-100 data-[hover=true]:text-default-700 text-xs"
               >
-                <X size={14} />
+                ✕
               </Button>
-            ) : null
+            ) : (
+              <kbd className="hidden sm:inline-block px-1.5 py-0.5 rounded border border-default-200 bg-white text-[10px] font-mono text-default-400">
+                /
+              </kbd>
+            )
           }
           classNames={{
-            base: 'w-80',
+            base: 'flex-1 min-w-[240px] max-w-md',
             inputWrapper:
-              'h-8 bg-zinc-100 data-[hover=true]:bg-zinc-50 data-[focus=true]:bg-white data-[focus=true]:border-emerald-500',
+              'h-9 bg-default-100 data-[hover=true]:bg-default-200/70 group-data-[focus=true]:bg-white border border-transparent group-data-[focus=true]:border-default-300 transition-colors',
+            input: 'text-sm placeholder:text-default-400',
           }}
         />
 
-        {filters.map((f) => (
-          <FilterChip
-            key={f.key}
-            def={f}
-            value={params[f.key]}
-            onChange={(v) => updateParam(f.key, v)}
-          />
-        ))}
+        {/* Filters button */}
+        <Button
+          size="sm"
+          variant={activeFilters > 0 ? 'solid' : 'bordered'}
+          color={activeFilters > 0 ? 'default' : 'default'}
+          onPress={() => setFilterPanelOpen(true)}
+          startContent={<SlidersHorizontal size={14} />}
+          className={
+            activeFilters > 0
+              ? 'bg-zinc-900 text-white data-[hover=true]:bg-zinc-800'
+              : 'border-default-200 data-[hover=true]:bg-default-100'
+          }
+        >
+          Фильтры
+          {activeFilters > 0 && (
+            <span className="ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-white/20 text-[10px] font-bold tabular-nums">
+              {activeFilters}
+            </span>
+          )}
+        </Button>
 
-        {hasActive && (
+        {/* Columns button */}
+        <ColumnVisibilityMenu
+          columns={userColumns}
+          visible={columnVisibility}
+          onChange={setColumnVisibility}
+        />
+
+        {/* Density toggle */}
+        <Tooltip content={density === 'comfortable' ? 'Компактная' : 'Обычная'} placement="bottom">
           <Button
+            isIconOnly
             size="sm"
-            variant="light"
-            onPress={resetAll}
-            className="text-zinc-500"
-            startContent={<X size={12} />}
+            variant="bordered"
+            onPress={() => setDensity((d) => (d === 'comfortable' ? 'compact' : 'comfortable'))}
+            aria-label="Плотность"
+            className="border-default-200 data-[hover=true]:bg-default-100 text-default-600 w-8 min-w-8"
           >
-            Сбросить
+            <Rows3 size={14} className={density === 'compact' ? 'rotate-180' : ''} />
           </Button>
-        )}
+        </Tooltip>
+
+        {/* Refresh */}
+        <Tooltip content="Обновить" placement="bottom">
+          <Button
+            isIconOnly
+            size="sm"
+            variant="bordered"
+            onPress={() => refetch()}
+            isDisabled={isFetching && !isLoading}
+            aria-label="Обновить"
+            className="border-default-200 data-[hover=true]:bg-default-100 text-default-600 w-8 min-w-8"
+          >
+            <RefreshCcw size={14} className={isFetching ? 'animate-spin' : ''} />
+          </Button>
+        </Tooltip>
 
         <div className="flex-1" />
 
+        {/* Export */}
         <Button
           size="sm"
           variant="bordered"
           startContent={<Download size={14} />}
           onPress={exportCSV}
-          className="border-zinc-200"
+          className="border-default-200 data-[hover=true]:bg-default-100"
         >
           Export CSV
         </Button>
       </div>
 
-      {/* Stats line */}
-      <div className="flex items-center gap-3 text-[11px] text-zinc-500 px-1">
+      {/* ========== Active filter chips ========== */}
+      <ActiveFilterChips
+        filters={filters}
+        params={params}
+        onChange={updateParam}
+        onReset={resetAll}
+      />
+
+      {/* ========== Stats line ========== */}
+      <div className="flex items-center gap-3 text-[11px] text-default-500 px-1">
         <span>
-          Найдено <span className="text-zinc-900 font-semibold tabular-nums">{total.toLocaleString('ru-RU')}</span> {totalLabel}
+          {rowCount > 0 ? (
+            <>
+              <span className="text-default-900 font-semibold tabular-nums">
+                {((page - 1) * pageSize + 1).toLocaleString('ru-RU')}–{Math.min(page * pageSize, total).toLocaleString('ru-RU')}
+              </span>{' '}
+              из{' '}
+              <span className="text-default-900 font-semibold tabular-nums">
+                {total.toLocaleString('ru-RU')}
+              </span>{' '}
+              {totalLabel}
+            </>
+          ) : isLoading ? (
+            'Загружаем…'
+          ) : (
+            <>0 {totalLabel}</>
+          )}
         </span>
-        {data?.stats.avg_price ? (
+        {data?.stats?.avg_price ? (
           <>
-            <span>·</span>
+            <span className="text-default-300">·</span>
             <span>
-              средняя <span className="text-zinc-700 tabular-nums">{Math.round(data.stats.avg_price).toLocaleString('ru-RU')} ₽</span>
+              средняя{' '}
+              <span className="text-default-700 tabular-nums">
+                {Math.round(data.stats.avg_price).toLocaleString('ru-RU')} ₽
+              </span>
             </span>
           </>
         ) : null}
-        {data?.stats.avg_area ? (
+        {data?.stats?.avg_area ? (
           <>
-            <span>·</span>
+            <span className="text-default-300">·</span>
             <span>
-              средняя <span className="text-zinc-700 tabular-nums">{Math.round(data.stats.avg_area * 10) / 10} м²</span>
+              средняя{' '}
+              <span className="text-default-700 tabular-nums">
+                {Math.round(data.stats.avg_area * 10) / 10} м²
+              </span>
             </span>
           </>
         ) : null}
+        {isFetching && !isLoading && (
+          <>
+            <span className="text-default-300">·</span>
+            <span className="inline-flex items-center gap-1 text-primary-600">
+              <Spinner size="sm" className="text-current" /> обновляем
+            </span>
+          </>
+        )}
       </div>
 
-      {/* Table — virtualized */}
-      <div className="rounded-xl border border-zinc-200 bg-white overflow-hidden">
-        <div className="overflow-auto max-h-[calc(100vh-360px)]" ref={parentRef}>
+      {/* ========== Table ========== */}
+      <div className="rounded-xl border border-default-200 bg-white overflow-hidden">
+        <div
+          className="overflow-auto max-h-[calc(100vh-340px)]"
+          ref={parentRef}
+        >
           <table className="w-full text-[13px]">
-            <thead className="sticky top-0 z-10 bg-zinc-50 border-b border-zinc-200">
+            <thead className="sticky top-0 z-20 bg-default-50 border-b border-default-200">
               {table.getHeaderGroups().map((hg) => (
                 <tr key={hg.id}>
                   {hg.headers.map((h) => {
                     const canSort = h.column.getCanSort();
                     const sortDir = h.column.getIsSorted();
+                    const isSelect = h.column.id === '__select';
+                    const w = h.column.columnDef.size;
                     return (
                       <th
                         key={h.id}
+                        style={w ? { width: w } : undefined}
                         className={[
-                          'px-3 py-2 text-left font-semibold text-[11px] uppercase tracking-wider text-zinc-500 select-none',
-                          canSort ? 'cursor-pointer hover:text-zinc-900' : '',
+                          'px-3 py-2.5 text-left font-semibold text-[10px] uppercase tracking-wider text-default-500 select-none',
+                          isSelect ? 'bg-default-50' : '',
+                          canSort ? 'cursor-pointer hover:text-default-900 group' : '',
                         ].join(' ')}
                         onClick={canSort ? h.column.getToggleSortingHandler() : undefined}
                       >
                         <span className="inline-flex items-center gap-1">
                           {flexRender(h.column.columnDef.header, h.getContext())}
                           {canSort && (
-                            sortDir === 'asc' ? (
-                              <ArrowUp size={11} className="text-zinc-900" />
-                            ) : sortDir === 'desc' ? (
-                              <ArrowDown size={11} className="text-zinc-900" />
-                            ) : (
-                              <ArrowUpDown size={11} className="text-zinc-300" />
-                            )
+                            <span
+                              className={[
+                                'inline-flex items-center',
+                                sortDir ? 'text-default-900' : 'text-default-300 group-hover:text-default-500',
+                              ].join(' ')}
+                            >
+                              {sortDir === 'asc' ? (
+                                <ArrowUp size={11} strokeWidth={2.5} />
+                              ) : sortDir === 'desc' ? (
+                                <ArrowDown size={11} strokeWidth={2.5} />
+                              ) : (
+                                <ArrowUpDown size={11} />
+                              )}
+                            </span>
                           )}
                         </span>
                       </th>
@@ -456,16 +590,47 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
               ))}
             </thead>
             <tbody style={{ height: `${virtualizer.getTotalSize()}px`, position: 'relative' }}>
-              {isLoading && (
+              {/* loading skeleton on first load only */}
+              {isLoading && rowCount === 0 && (
                 <tr>
-                  <td colSpan={columns.length} className="text-center py-12 text-zinc-500">
-                    <Spinner size="sm" /> Загрузка…
+                  <td colSpan={allColumns.length} className="text-center py-16">
+                    <div className="flex flex-col items-center gap-2 text-default-500">
+                      <Spinner size="sm" />
+                      <span className="text-[12px]">Загружаем…</span>
+                    </div>
                   </td>
                 </tr>
               )}
+
+              {!isLoading && rowCount === 0 && (
+                <tr>
+                  <td colSpan={allColumns.length} className="p-0">
+                    <EmptyState
+                      variant={
+                        error
+                          ? 'error'
+                          : hasAnyFilter
+                            ? 'no-results'
+                            : 'no-data'
+                      }
+                      errorMessage={(error as Error)?.message}
+                      hasFilters={activeFilters > 0}
+                      hasSearch={hasSearch}
+                      onResetFilters={resetAll}
+                      onResetSearch={() => {
+                        setSearchInput('');
+                        updateParam('q', undefined);
+                      }}
+                      onRefresh={() => refetch()}
+                    />
+                  </td>
+                </tr>
+              )}
+
               {!isLoading && virtualizer.getVirtualItems().map((vr) => {
                 const row = table.getRowModel().rows[vr.index];
                 if (!row) return null;
+                const isSelected = selected.has(row.original[idKey]);
                 return (
                   <tr
                     key={row.id}
@@ -480,33 +645,46 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
                       tableLayout: 'auto',
                       width: '100%',
                     }}
-                    className="border-b border-zinc-100 hover:bg-zinc-50"
+                    className={[
+                      'border-b border-default-100 transition-colors',
+                      isSelected
+                        ? 'bg-primary-50/60'
+                        : 'hover:bg-default-50',
+                      rowHref ? 'cursor-pointer' : '',
+                    ].join(' ')}
+                    onClick={(e) => {
+                      // Don't navigate when clicking an interactive control
+                      // inside the row (link, button, checkbox).
+                      const tgt = e.target as HTMLElement;
+                      if (tgt.closest('a, button, input, [role="button"]')) return;
+                      if (rowHref) {
+                        const href = rowHref(row.original);
+                        if (href) window.open(href, '_blank', 'noopener,noreferrer');
+                      }
+                    }}
                   >
                     {row.getVisibleCells().map((cell) => (
-                      <td key={cell.id} className="px-3 py-2 align-middle">
+                      <td
+                        key={cell.id}
+                        className={[
+                          'px-3 align-middle',
+                          density === 'compact' ? 'py-1' : 'py-2.5',
+                          cell.column.id === '__select' ? 'bg-inherit' : '',
+                        ].join(' ')}
+                      >
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </td>
                     ))}
                   </tr>
                 );
               })}
-              {!isLoading && (data?.rows.length ?? 0) === 0 && (
-                <tr>
-                  <td colSpan={columns.length} className="text-center py-12 text-zinc-500">
-                    Ничего не нашлось
-                  </td>
-                </tr>
-              )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* Pagination */}
-      <div className="flex items-center gap-3 text-[12px] text-zinc-500">
-        <span className="tabular-nums">
-          {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} из {total.toLocaleString('ru-RU')}
-        </span>
+      {/* ========== Pagination ========== */}
+      <div className="flex items-center gap-4 flex-wrap">
         <Pagination
           total={totalPages}
           page={page}
@@ -514,10 +692,82 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
           size="sm"
           showControls
           color="default"
+          classNames={{ wrapper: 'gap-1', item: 'w-8 h-8 min-w-8 text-[12px]', cursor: 'bg-zinc-900 text-white' }}
         />
+
         <div className="flex-1" />
-        <span>по {pageSize} на стр.</span>
+
+        <Select
+          size="sm"
+          variant="flat"
+          selectedKeys={new Set([String(pageSize)])}
+          onSelectionChange={(keys) => {
+            const v = Array.from(keys as Set<string>)[0];
+            if (v) setPageSize(parseInt(v, 10));
+          }}
+          aria-label="Размер страницы"
+          className="w-28"
+          classNames={{ trigger: 'h-8 min-h-8 bg-default-100 data-[hover=true]:bg-default-200/70' }}
+        >
+          {pageSizeOptions.map((n) => (
+            <SelectItem key={String(n)}>{n} на стр.</SelectItem>
+          ))}
+        </Select>
       </div>
+
+      {/* ========== Bulk action bar ========== */}
+      {selectedRows.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[1000] bg-zinc-900 text-white rounded-full shadow-2xl pl-4 pr-2 py-2 flex items-center gap-3 animate-fade-in">
+          <span className="text-[12px] font-semibold tabular-nums">
+            {selectedRows.length} выбрано
+          </span>
+          <Divider orientation="vertical" className="h-5 bg-white/20" />
+          {rowHref && (
+            <Button
+              size="sm"
+              variant="light"
+              startContent={<ExternalLink size={12} />}
+              onPress={() => {
+                const href = rowHref(selectedRows[0]);
+                if (href) window.open(href, '_blank', 'noopener,noreferrer');
+              }}
+              className="text-white data-[hover=true]:bg-white/10"
+            >
+              Открыть
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="light"
+            startContent={<Download size={12} />}
+            onPress={exportCSV}
+            className="text-white data-[hover=true]:bg-white/10"
+          >
+            Export
+          </Button>
+          <Divider orientation="vertical" className="h-5 bg-white/20" />
+          <Button
+            isIconOnly
+            size="sm"
+            variant="light"
+            onPress={() => setSelected(new Set())}
+            aria-label="Снять выделение"
+            className="text-white data-[hover=true]:bg-white/10 w-7 min-w-7"
+          >
+            <X size={14} />
+          </Button>
+        </div>
+      )}
+
+      {/* ========== Filter drawer ========== */}
+      <FilterPanel
+        isOpen={filterPanelOpen}
+        onOpenChange={setFilterPanelOpen}
+        filters={filters}
+        params={params}
+        onChange={updateParam}
+        onReset={resetAll}
+      />
     </div>
   );
 }

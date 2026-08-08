@@ -4,12 +4,14 @@ import { useMemo } from 'react';
 import Link from 'next/link';
 import { Chip } from '@heroui/react';
 import { ExternalLink, Image as ImageIcon, AlertTriangle } from 'lucide-react';
-import DataTable, { type FilterDef } from '@/components/admin/DataTable';
+import DataTable from '@/components/admin/DataTable';
+import type { FilterDef } from '@/components/admin/FilterPanel';
 
 const FILTERS: FilterDef[] = [
   {
     key: 'rooms',
     label: 'Комнат',
+    group: 'Категории',
     kind: 'multi',
     options: [
       { value: '1', label: '1' },
@@ -18,16 +20,63 @@ const FILTERS: FilterDef[] = [
       { value: '4', label: '4+' },
     ],
   },
-  { key: 'price_min', label: 'Цена от', kind: 'range-min', placeholder: '5 000 000' },
-  { key: 'price_max', label: 'до', kind: 'range-max', placeholder: '20 000 000' },
-  { key: 'area_min', label: 'Площадь от', kind: 'range-min', placeholder: '30' },
-  { key: 'area_max', label: 'до', kind: 'range-max', placeholder: '80' },
-  { key: 'days_max', label: 'Дней', kind: 'range-max', placeholder: '60' },
-  { key: 'has_avans', label: 'С авансом', kind: 'toggle', toggleOn: 'true' },
-  { key: 'source', label: 'Источник', kind: 'multi', options: [
-    { value: 'cian_active', label: 'ЦИАН' },
-    { value: 'avans', label: 'Аванс' },
-  ] },
+  {
+    key: 'price_min',
+    label: 'Цена',
+    group: 'Цена',
+    kind: 'range-min',
+    placeholder: '5 000 000',
+    unit: '₽',
+  },
+  {
+    key: 'price_max',
+    label: 'Цена',
+    group: 'Цена',
+    kind: 'range-max',
+    placeholder: '20 000 000',
+    unit: '₽',
+  },
+  {
+    key: 'area_min',
+    label: 'Площадь',
+    group: 'Площадь',
+    kind: 'range-min',
+    placeholder: '30',
+    unit: 'м²',
+  },
+  {
+    key: 'area_max',
+    label: 'Площадь',
+    group: 'Площадь',
+    kind: 'range-max',
+    placeholder: '80',
+    unit: 'м²',
+  },
+  {
+    key: 'days_max',
+    label: 'Дней',
+    group: 'Срок',
+    kind: 'range-max',
+    placeholder: '60',
+    unit: 'дн.',
+  },
+  {
+    key: 'has_avans',
+    label: 'С авансом',
+    group: 'Дополнительно',
+    kind: 'toggle',
+    toggleOn: 'true',
+  },
+  {
+    key: 'source',
+    label: 'Источник',
+    group: 'Дополнительно',
+    kind: 'multi',
+    options: [
+      { value: 'cian_active', label: 'ЦИАН' },
+      { value: 'avans', label: 'Аванс' },
+    ],
+  },
 ];
 
 function fmt(n: number | null | undefined): string {
@@ -178,6 +227,7 @@ export default function ActivePage() {
         initialSort={[{ id: 'price_per_m2', desc: false }]}
         totalLabel="объявлений"
         pageSize={50}
+        rowHref={(row) => row.url || null}
       />
     </div>
   );
