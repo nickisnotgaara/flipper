@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Input, Spinner, Chip, ScrollShadow } from '@heroui/react';
+import { Input, Spinner, Chip, ScrollShadow, Button } from '@heroui/react';
 import { fetchSuggest, type SuggestItem } from '@/lib/api';
 import { useDebounce } from '@/lib/useDebounce';
 
@@ -145,18 +145,22 @@ export default function SearchBox({
           loading ? (
             <Spinner size="sm" color="primary" />
           ) : q ? (
-            <button
-              onClick={() => {
+            <Button
+              isIconOnly
+              size="sm"
+              radius="full"
+              variant="light"
+              onPress={() => {
                 setQ('');
                 setItems([]);
                 setOpen(false);
                 inputRef.current?.focus();
               }}
-              className="w-5 h-5 rounded-full text-default-500 hover:bg-default-100 hover:text-default-700 flex items-center justify-center text-xs"
+              className="w-5 h-5 min-w-5 text-default-500 data-[hover=true]:bg-default-100 data-[hover=true]:text-default-700 text-xs"
               aria-label="очистить"
             >
               ✕
-            </button>
+            </Button>
           ) : null
         }
         classNames={{

@@ -265,22 +265,28 @@ export default function PhotoGallery({ isOpen, onOpenChange, photos, startIndex 
                 </div>
               </div>
 
-              <button
-                type="button"
+              <Button
+                isIconOnly
+                size="sm"
+                radius="full"
+                variant="solid"
                 aria-label="Предыдущее фото"
-                onClick={() => go(-1)}
-                className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white text-default-700 border border-default-200 shadow-card hover:bg-default-50 flex items-center justify-center transition"
+                onPress={() => go(-1)}
+                className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 w-10 h-10 min-w-10 !p-0 bg-white text-default-700 border border-default-200 shadow-card data-[hover=true]:bg-default-50 transition"
               >
                 <ChevronLeftIcon size={20} />
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                isIconOnly
+                size="sm"
+                radius="full"
+                variant="solid"
                 aria-label="Следующее фото"
-                onClick={() => go(1)}
-                className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white text-default-700 border border-default-200 shadow-card hover:bg-default-50 flex items-center justify-center transition"
+                onPress={() => go(1)}
+                className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 w-10 h-10 min-w-10 !p-0 bg-white text-default-700 border border-default-200 shadow-card data-[hover=true]:bg-default-50 transition"
               >
                 <ChevronRightIcon size={20} />
-              </button>
+              </Button>
             </div>
 
             {/* Bottom row: thumbnail strip + photo count.
@@ -305,18 +311,20 @@ export default function PhotoGallery({ isOpen, onOpenChange, photos, startIndex 
                   if (!src) return null;
                   const isActive = i === active;
                   return (
-                    <button
+                    <Button
                       key={p.id ?? i}
-                      type="button"
+                      isIconOnly
+                      radius="md"
+                      variant="flat"
                       data-thumb-idx={i}
-                      onClick={() => setActive(i)}
+                      onPress={() => setActive(i)}
                       // `outline` instead of `ring` so the focus
                       // ring isn't clipped by the parent
                       // overflow-x-auto.
-                      className={`shrink-0 snap-start relative w-14 h-14 sm:w-20 sm:h-20 rounded-md overflow-hidden transition-all ${
+                      className={`shrink-0 snap-start relative w-14 h-14 sm:w-20 sm:h-20 min-w-14 sm:min-w-20 !p-0 overflow-hidden transition-all ${
                         isActive
-                          ? 'outline outline-[2.5px] outline-primary outline-offset-2'
-                          : 'opacity-65 hover:opacity-100 outline outline-1 outline-default-300 outline-offset-0'
+                          ? '!outline !outline-[2.5px] !outline-primary !outline-offset-2 bg-default-100'
+                          : 'opacity-65 hover:opacity-100 !outline !outline-1 !outline-default-300 !outline-offset-0 bg-default-100'
                       }`}
                       aria-label={`Фото ${i + 1}`}
                       aria-current={isActive ? 'true' : undefined}
@@ -337,7 +345,7 @@ export default function PhotoGallery({ isOpen, onOpenChange, photos, startIndex 
                           </svg>
                         </span>
                       )}
-                    </button>
+                    </Button>
                   );
                 })}
               </div>

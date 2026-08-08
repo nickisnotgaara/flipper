@@ -1791,3 +1791,406 @@ def main():
 if __name__ == "__main__":
     main()
 
+
+# ---------------------------------------------------------------------------
+# Admin Panel v1 — generic table endpoints (Phase 4+)
+# Server-side pagination, sort, search, filters. Returns `{rows, total, stats}`.
+# ---------------------------------------------------------------------------
+
+_TABLE_CONFIGS = {
+    "active": {
+        "table": "active_ads",
+        "source_filter": "source='cian_active'",
+        "select": "id, source, external_id, url, price, price_per_m2, area, rooms, "
+                  "floor_current, floor_total, district, okrug, metro_station, metro_walk_time, "
+                  "renovation, days_in_exposition, title, publish_date, filter_id, house_id",
+        "search_cols": ["title", "address", "district", "okrug", "metro_station", "external_id"],
+    },
+    "sold": {
+        "table": "sold_ads",
+        "source_filter": "source='cian_active'",
+        "select": "id, source, external_id, url, price, price_per_m2, area, rooms, "
+                  "sold_date, days_in_exposition, title, house_id",
+        "search_cols": ["title", "address", "external_id"],
+    },
+    "hidden": {
+        "table": "sold_ads",
+        "source_filter": "source='cian_deactivated'",
+        "select": "id, source, external_id, url, price, area, rooms, sold_date, house_id",
+        "search_cols": ["address", "external_id"],
+    },
+    "houses": {
+        "table": "houses",
+        "source_filter": None,  # all sources
+        "select": "id, source, address, street, house_num, year, type, levels, "
+                  "series, lat, lng, active_count, deactivated_count",
+        "search_cols": ["address", "street", "house_num", "series"],
+    },
+}
+
+
+def _parse_int(v, default=None, lo=None, hi=None):
+    if v is None or v == "":
+        return default
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return default
+    if lo is not None and n < lo:
+        n = lo
+    if hi is not None and n > hi:
+        n = hi
+    return n
+
+
+def _table_query(name: str):
+    """Return SELECT clause + source WHERE for a given table name."""
+    cfg = _TABLE_CONFIGS.get(name)
+    if not cfg:
+        return None
+    return cfg
+
+
+async def _fetch_table_rows(name: str, params: dict) -> dict:
+    """Generic paginated table fetch with sort + search + filters.
+
+    Returns: {rows: [...], total: int, page, page_size, stats: {...}}
+    """
+    cfg = _table_query(name)
+    if not cfg:
+        raise HTTPException(status_code=404, detail=f"Unknown table '{name}'")
+
+    page = _parse_int(params.get("page"), default=1, lo=1, hi=100_000)
+    page_size = _parse_int(params.get("page_size"), default=50, lo=1, hi=500)
+    sort = (params.get("sort") or "").strip() or None
+    order = (params.get("order") or "asc").lower()
+    if order not in ("asc", "desc"):
+        order = "asc"
+    q = (params.get("q") or "").strip()
+
+    # Whitelist sort columns to prevent SQL injection.
+    SORT_WHITELIST = {
+        "active": {"id", "price", "price_per_m2", "area", "rooms", "days_in_exposition", "publish_date"},
+        "sold":   {"id", "price", "price_per_m2", "area", "rooms", "sold_date", "days_in_exposition"},
+        "hidden": {"id", "price", "area", "rooms", "sold_date"},
+        "houses": {"id", "year", "levels", "active_count", "deactivated_count"},
+    }
+    if sort and sort not in SORT_WHITELIST.get(name, set()):
+        sort = None
+
+    where_clauses = []
+    where_params: list = []
+
+    if cfg["source_filter"]:
+        where_clauses.append(cfg["source_filter"])
+
+    # Numeric range filters (per-table)
+    range_filters = {
+        "active": [
+            ("price_min", "price_max", "price"),
+            ("area_min", "area_max", "area"),
+            ("days_min", "days_max", "days_in_exposition"),
+        ],
+        "sold": [
+            ("price_min", "price_max", "price"),
+            ("area_min", "area_max", "area"),
+            ("days_min", "days_max", "days_in_exposition"),
+        ],
+        "hidden": [
+            ("price_min", "price_max", "price"),
+            ("area_min", "area_max", "area"),
+        ],
+        "houses": [
+            ("year_min", "year_max", "year"),
+        ],
+    }
+    for mn, mx, col in range_filters.get(name, []):
+        v = _parse_int(params.get(mn))
+        if v is not None:
+            where_clauses.append(f"{col} >= ${len(where_params) + 1}")
+            where_params.append(v)
+        v = _parse_int(params.get(mx))
+        if v is not None:
+            where_clauses.append(f"{col} <= ${len(where_params) + 1}")
+            where_params.append(v)
+
+    # rooms multi-select (CSV)
+    if name in ("active", "sold", "hidden"):
+        rooms = (params.get("rooms") or "").strip()
+        if rooms:
+            try:
+                rlist = [int(r) for r in rooms.split(",") if r]
+                if rlist:
+                    where_clauses.append(
+                        f"rooms = ANY(${len(where_params) + 1}::int[])"
+                    )
+                    where_params.append(rlist)
+            except ValueError:
+                pass
+
+    # source multi-select (CSV)
+    if name in ("active", "sold", "hidden", "houses"):
+        sources = (params.get("source") or "").strip()
+        if sources:
+            slist = [s.strip() for s in sources.split(",") if s.strip()]
+            if slist:
+                where_clauses.append(
+                    f"source = ANY(${len(where_params) + 1}::text[])"
+                )
+                where_params.append(slist)
+
+    # Full-text search (case-insensitive contains) — search across configured cols.
+    # We use ILIKE on a single concatenated text. Cheap at 5k rows; for 200k
+    # we'd switch to a tsvector index, but Flipper's data is too small to matter.
+    if q:
+        qcol_parts = []
+        for c in cfg["search_cols"]:
+            qcol_parts.append(f"COALESCE({c}::text, '')")
+        concat = " || ' ' || ".join(qcol_parts)
+        where_clauses.append(f"({concat}) ILIKE ${len(where_params) + 1}")
+        where_params.append(f"%{q}%")
+
+    where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+    sort_sql = f" ORDER BY {sort} {order.upper()}, id {order.upper()}" if sort else " ORDER BY id DESC"
+
+    offset = (page - 1) * page_size
+    limit_sql = f" LIMIT {page_size} OFFSET {offset}"
+
+    from sqlalchemy import text as _text
+
+    engine = get_engine()
+    async with engine.begin() as conn:
+        total = await conn.scalar(
+            _text(f"SELECT COUNT(*) FROM {cfg['table']}{where_sql}"),
+            where_params,
+        )
+
+        sel_sql = f"SELECT {cfg['select']} FROM {cfg['table']}{where_sql}{sort_sql}{limit_sql}"
+        result = await conn.execute(_text(sel_sql), where_params)
+        cols = list(result.keys())
+        rows = [dict(zip(cols, r)) for r in result.fetchall()]
+
+        # Simple stats (count + median-ish)
+        stats_sql = f"SELECT COUNT(*) AS n, COALESCE(AVG(price), 0) AS avg_p, COALESCE(AVG(area), 0) AS avg_a FROM {cfg['table']}{where_sql}"
+        stats_row = await conn.execute(_text(stats_sql), where_params)
+        s = stats_row.fetchone()
+        stats = {
+            "count": total or 0,
+            "avg_price": float(s[1]) if s and s[1] is not None else 0,
+            "avg_area": float(s[2]) if s and s[2] is not None else 0,
+        }
+
+    # Serialize datetimes/dates to ISO strings
+    for row in rows:
+        for k, v in list(row.items()):
+            if hasattr(v, "isoformat"):
+                row[k] = v.isoformat()
+
+    return {
+        "rows": rows,
+        "total": int(total or 0),
+        "page": page,
+        "page_size": page_size,
+        "stats": stats,
+    }
+
+
+@app.get("/api/tables/active")
+async def table_active(request: Request):
+    return await _fetch_table_rows("active", dict(request.query_params))
+
+
+@app.get("/api/tables/sold")
+async def table_sold(request: Request):
+    return await _fetch_table_rows("sold", dict(request.query_params))
+
+
+@app.get("/api/tables/hidden")
+async def table_hidden(request: Request):
+    return await _fetch_table_rows("hidden", dict(request.query_params))
+
+
+@app.get("/api/tables/houses")
+async def table_houses(request: Request):
+    return await _fetch_table_rows("houses", dict(request.query_params))
+
+
+@app.get("/api/tables/{name}/export")
+async def table_export(name: str, request: Request):
+    """Stream CSV of the current filter set (no pagination — admin-only)."""
+    from fastapi.responses import StreamingResponse
+    import csv, io
+
+    cfg = _table_query(name)
+    if not cfg:
+        raise HTTPException(status_code=404, detail=f"Unknown table '{name}'")
+
+    # Reuse _fetch_table_rows but with huge page_size.
+    params = dict(request.query_params)
+    params["page_size"] = "100000"
+    params["page"] = "1"
+    data = await _fetch_table_rows(name, params)
+    rows = data["rows"]
+    if not rows:
+        return StreamingResponse(
+            iter([b"no rows\n"]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{name}.csv"'},
+        )
+
+    def gen():
+        buf = io.StringIO()
+        w = csv.DictWriter(buf, fieldnames=list(rows[0].keys()))
+        w.writeheader()
+        yield buf.getvalue()
+        buf.seek(0); buf.truncate()
+        for r in rows:
+            w.writerow({k: ("" if v is None else v) for k, v in r.items()})
+            yield buf.getvalue()
+            buf.seek(0); buf.truncate()
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{name}.csv"'},
+    )
+
+
+# ---- Dashboard widgets ------------------------------------------------------
+
+@app.get("/api/dashboard/kpi")
+async def dashboard_kpi():
+    """Headline KPIs for the dashboard."""
+    from sqlalchemy import text as _text
+    engine = get_engine()
+    async with engine.begin() as conn:
+        active = await conn.scalar(
+            _text("SELECT COUNT(*) FROM active_ads WHERE source='cian_active'")
+        )
+        houses = await conn.scalar(_text("SELECT COUNT(*) FROM houses"))
+        with_coords = await conn.scalar(
+            _text("SELECT COUNT(*) FROM houses WHERE lat IS NOT NULL")
+        )
+        deactivated = await conn.scalar(
+            _text(
+                "SELECT COUNT(*) FROM sold_ads WHERE "
+                "source IN ('cian_deactivated', 'cian_sold', 'domclick_sold', 'winners_sold')"
+            )
+        )
+        with_ads = await conn.scalar(
+            _text(
+                "SELECT COUNT(*) FROM houses WHERE EXISTS ("
+                "  SELECT 1 FROM active_ads a WHERE a.house_id = houses.id"
+                ")"
+            )
+        )
+    return {
+        "active_total": int(active or 0),
+        "houses": int(houses or 0),
+        "houses_with_coords": int(with_coords or 0),
+        "deactivated_total": int(deactivated or 0),
+        "houses_with_ads": int(with_ads or 0),
+    }
+
+
+@app.get("/api/dashboard/hot-houses")
+async def dashboard_hot_houses():
+    """Top 10 houses by active_ad count."""
+    from sqlalchemy import text as _text
+    engine = get_engine()
+    async with engine.begin() as conn:
+        rows = await conn.execute(
+            _text(
+                """
+                SELECT h.id, h.address, COUNT(a.id) AS n
+                FROM houses h
+                JOIN active_ads a ON a.house_id = h.id
+                WHERE h.lat IS NOT NULL
+                GROUP BY h.id, h.address
+                ORDER BY n DESC, h.id ASC
+                LIMIT 10
+                """
+            )
+        )
+    return [
+        {"id": r[0], "address": r[1], "count": int(r[2])}
+        for r in rows.fetchall()
+    ]
+
+
+# ---- Pipeline status -------------------------------------------------------
+
+@app.get("/api/pipeline/status")
+async def pipeline_status():
+    """Per-parser status (read from /api/pipeline/last-run if available, else static)."""
+    from sqlalchemy import text as _text
+    engine = get_engine()
+    PARSERS = ["cian_active", "cian_sold", "domclick_sold", "winners_sold", "flatinfo_houses"]
+    out = []
+    async with engine.begin() as conn:
+        for p in PARSERS:
+            try:
+                row = await conn.execute(
+                    _text(
+                        "SELECT MAX(last_run_at), MAX(ok) FROM parser_runs WHERE parser_name = :n"
+                    ),
+                    {"n": p},
+                )
+                last = row.fetchone()
+                out.append({
+                    "name": p,
+                    "last_run_at": last[0].isoformat() if last and last[0] else None,
+                    "status": "ok" if last and last[1] else ("never" if not last or not last[0] else "fail"),
+                })
+            except Exception:
+                out.append({"name": p, "last_run_at": None, "status": "unknown"})
+    return out
+
+
+# ---- Saved filters (Phase 7, simple in-memory) ---------------------------
+
+_SAVED_FILTERS: list[dict] = [
+    {
+        "id": 1,
+        "name": "1к до 12М в ЦАО",
+        "table": "active",
+        "filters": {"rooms": "1", "price_max": "12000000"},
+        "created_at": "2026-08-08T12:00:00",
+    },
+    {
+        "id": 2,
+        "name": "С ремонтом, с фото",
+        "table": "active",
+        "filters": {"has_renovation": "true", "has_photos": "true"},
+        "created_at": "2026-08-08T12:30:00",
+    },
+]
+
+
+@app.get("/api/saved-filters")
+async def saved_filters_list():
+    return _SAVED_FILTERS
+
+
+@app.post("/api/saved-filters")
+async def saved_filters_create(payload: dict):
+    import time
+    new_id = max([f["id"] for f in _SAVED_FILTERS], default=0) + 1
+    item = {
+        "id": new_id,
+        "name": payload.get("name") or f"Filter #{new_id}",
+        "table": payload.get("table") or "active",
+        "filters": payload.get("filters") or {},
+        "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+    _SAVED_FILTERS.append(item)
+    return item
+
+
+@app.delete("/api/saved-filters/{fid}")
+async def saved_filters_delete(fid: int):
+    global _SAVED_FILTERS
+    _SAVED_FILTERS = [f for f in _SAVED_FILTERS if f["id"] != fid]
+    return {"ok": True, "remaining": len(_SAVED_FILTERS)}
+
+

@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard V2 — wireframe · Flipper</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #fafafa;
+    --surface: #ffffff;
+    --line: #e4e4e7;
+    --line-soft: #f1f1f3;
+    --ink: #14171e;
+    --ink-soft: #3a4256;
+    --muted: #71717a;
+    --muted-2: #a1a1aa;
+    --primary: #10b981;
+    --primary-soft: #d1fae5;
+    --warn: #f59e0b;
+    --warn-soft: #fef3c7;
+    --rose: #f43f5e;
+    --rose-soft: #ffe4e6;
+    --indigo: #6366f1;
+    --indigo-soft: #e0e7ff;
+    --shadow: 0 1px 2px rgba(0,0,0,0.04), 0 0 0 1px rgba(0,0,0,0.02);
+    --shadow-md: 0 4px 16px -2px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.02);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'Outfit', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 14px;
+    line-height: 1.5;
+    overflow: hidden;
+  }
+
+  /* ── App shell ─────────────────────────────────────────── */
+  .app {
+    display: grid;
+    grid-template-rows: 48px 1fr;
+    height: 100vh;
+  }
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+  }
+  .logo {
+    display: flex; align-items: center; gap: 6px;
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--ink);
+    letter-spacing: -0.01em;
+  }
+  .logo svg { color: var(--primary); }
+  .stats {
+    display: flex; gap: 4px;
+    margin-left: 16px;
+  }
+  .stat {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 10px;
+    border-radius: 8px;
+    background: var(--line-soft);
+    font-size: 12px;
+  }
+  .stat .num { font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .stat .lbl { color: var(--muted); }
+  .stat.active { background: var(--rose-soft); }
+  .stat.deact  { background: var(--line-soft); }
+  .stat.houses { background: var(--indigo-soft); }
+  .stat .num.active { color: var(--rose); }
+  .stat .num.houses { color: var(--indigo); }
+  .spacer { flex: 1; }
+  .search {
+    position: relative;
+    width: 280px;
+  }
+  .search input {
+    width: 100%;
+    height: 32px;
+    padding: 0 12px 0 32px;
+    background: var(--line-soft);
+    border: 1px solid transparent;
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--ink);
+    transition: all 150ms;
+  }
+  .search input:focus {
+    outline: none;
+    background: var(--surface);
+    border-color: var(--primary);
+  }
+  .search svg { position: absolute; left: 10px; top: 8px; color: var(--muted); }
+  .icon-btn {
+    width: 32px; height: 32px;
+    display: flex; align-items: center; justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 150ms;
+  }
+  .icon-btn:hover { background: var(--line-soft); color: var(--ink); }
+
+  /* ── Split pane ───────────────────────────────────────── */
+  .split {
+    display: grid;
+    grid-template-columns: minmax(420px, 45%) 1fr;
+    overflow: hidden;
+  }
+  .map-pane {
+    position: relative;
+    background: #e8eef0;
+    overflow: hidden;
+  }
+  /* fake map */
+  .map-bg {
+    position: absolute; inset: 0;
+    background:
+      linear-gradient(45deg, transparent 49%, rgba(0,0,0,0.04) 49%, rgba(0,0,0,0.04) 51%, transparent 51%),
+      linear-gradient(-45deg, transparent 49%, rgba(0,0,0,0.04) 49%, rgba(0,0,0,0.04) 51%, transparent 51%),
+      radial-gradient(ellipse at 35% 45%, #d4e1d8 0%, #b8c8be 70%);
+    background-size: 40px 40px, 40px 40px, 100% 100%;
+  }
+  .road {
+    position: absolute;
+    background: rgba(255,255,255,0.7);
+    border-top: 1px solid rgba(0,0,0,0.06);
+    border-bottom: 1px solid rgba(0,0,0,0.06);
+  }
+  .road.h1 { left: 20%; right: 30%; top: 35%; height: 8px; }
+  .road.h2 { left: 5%;  right: 60%; top: 62%; height: 6px; }
+  .road.v1 { top: 10%;  bottom: 40%; left: 38%; width: 7px; }
+  .road.v2 { top: 30%;  bottom: 20%; left: 70%; width: 5px; }
+  .river {
+    position: absolute;
+    left: -10%; right: 60%; top: 75%;
+    height: 50px;
+    background: linear-gradient(180deg, #a4c4d6 0%, #8ab4c9 100%);
+    transform: rotate(-3deg);
+    border-radius: 30%;
+  }
+  /* fake markers */
+  .marker {
+    position: absolute;
+    width: 28px; height: 28px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--rose);
+    color: white;
+    font-weight: 700;
+    font-size: 12px;
+    border-radius: 50%;
+    box-shadow: 0 2px 6px rgba(244,63,94,0.3), 0 0 0 2px white;
+    cursor: pointer;
+    transition: transform 200ms;
+    font-variant-numeric: tabular-nums;
+  }
+  .marker:hover { transform: scale(1.15); }
+  .marker.m2 { background: white; color: var(--ink); box-shadow: 0 2px 4px rgba(0,0,0,0.1), 0 0 0 2px white; }
+  .marker.m3 { background: var(--ink); color: white; }
+  .marker.m4 {
+    width: 12px; height: 12px;
+    background: var(--muted-2);
+    box-shadow: 0 0 0 2px white;
+  }
+  .marker.pulsing {
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 2px white, 0 0 0 0 rgba(244,63,94,0.5); }
+    50% { box-shadow: 0 0 0 2px white, 0 0 0 12px rgba(244,63,94,0); }
+  }
+  .map-controls {
+    position: absolute;
+    top: 12px; left: 12px;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .map-btn {
+    width: 32px; height: 32px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--ink-soft);
+    cursor: pointer;
+    box-shadow: var(--shadow);
+  }
+  .map-attrib {
+    position: absolute;
+    bottom: 6px; right: 8px;
+    font-size: 10px;
+    color: var(--muted);
+    background: rgba(255,255,255,0.7);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  .map-legend {
+    position: absolute;
+    bottom: 12px; left: 12px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 10px 12px;
+    box-shadow: var(--shadow);
+    font-size: 11px;
+    color: var(--ink-soft);
+  }
+  .map-legend h4 { font-size: 10px; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; letter-spacing: 0.04em; }
+  .map-legend .row { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+  .map-legend .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .map-legend .dot.r { background: var(--rose); }
+  .map-legend .dot.w { background: white; border: 1px solid var(--ink); }
+  .map-legend .dot.k { background: var(--ink); }
+  .map-legend .dot.g { background: var(--muted-2); }
+
+  /* ── Table pane ───────────────────────────────────────── */
+  .table-pane {
+    display: flex; flex-direction: column;
+    background: var(--surface);
+    border-left: 1px solid var(--line);
+    overflow: hidden;
+  }
+  .pane-header {
+    padding: 12px 16px 0 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .tabs {
+    display: flex; gap: 4px;
+    margin-bottom: 12px;
+  }
+  .tab {
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 150ms;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .tab:hover { background: var(--line-soft); color: var(--ink); }
+  .tab.active { background: var(--ink); color: white; }
+  .tab .badge {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.15);
+    color: inherit;
+    font-variant-numeric: tabular-nums;
+  }
+  .tab:not(.active) .badge { background: var(--line-soft); color: var(--muted); }
+
+  .filters {
+    display: flex; gap: 8px; align-items: center;
+    padding-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  .filter-chip {
+    display: flex; align-items: center; gap: 4px;
+    padding: 4px 8px 4px 10px;
+    background: var(--line-soft);
+    border: 1px solid transparent;
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--ink-soft);
+    cursor: pointer;
+  }
+  .filter-chip:hover { border-color: var(--line); }
+  .filter-chip .lbl { color: var(--muted); }
+  .filter-chip .val { font-weight: 600; }
+  .filter-chip .caret { color: var(--muted-2); }
+  .filter-reset {
+    font-size: 12px;
+    color: var(--muted);
+    padding: 4px 8px;
+    cursor: pointer;
+    background: none;
+    border: none;
+  }
+  .filter-reset:hover { color: var(--rose); }
+  .summary {
+    font-size: 11px;
+    color: var(--muted);
+    padding: 6px 16px;
+    background: var(--line-soft);
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 16px;
+  }
+  .summary b { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .summary .sep { color: var(--muted-2); }
+
+  /* Table */
+  .table-wrap { flex: 1; overflow: auto; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  thead th {
+    position: sticky; top: 0;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+    padding: 8px 10px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+  }
+  thead th .sort { color: var(--ink); }
+  thead th:hover { background: var(--line-soft); }
+  thead th.num, tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody tr {
+    border-bottom: 1px solid var(--line-soft);
+    cursor: pointer;
+    transition: background 100ms;
+  }
+  tbody tr:hover { background: var(--line-soft); }
+  tbody tr.hot {
+    background: linear-gradient(90deg, rgba(244,63,94,0.05) 0%, transparent 100%);
+  }
+  tbody tr.hot:hover { background: rgba(244,63,94,0.08); }
+  tbody td { padding: 8px 10px; color: var(--ink-soft); }
+  tbody td.addr { color: var(--ink); font-weight: 500; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  tbody td.district { color: var(--muted); font-size: 12px; }
+  tbody td .src {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  tbody td .src.cian { background: var(--primary-soft); color: #047857; }
+  tbody td .src.avans { background: var(--warn-soft); color: #92400e; }
+  tbody td .src.dc { background: var(--indigo-soft); color: #4338ca; }
+  tbody td .icon-link {
+    color: var(--muted);
+    cursor: pointer;
+    margin-left: 4px;
+  }
+  tbody td .icon-link:hover { color: var(--primary); }
+  tbody td .photo-thumb {
+    display: inline-block;
+    width: 32px; height: 24px;
+    background: var(--line-soft);
+    border-radius: 4px;
+    margin-right: 6px;
+    vertical-align: middle;
+    background-size: cover;
+    background-position: center;
+  }
+  .pager {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 16px;
+    border-top: 1px solid var(--line);
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .pager .page-info { font-variant-numeric: tabular-nums; }
+  .pager .grow { flex: 1; }
+  .pager .nav-btn {
+    padding: 4px 10px;
+    background: var(--line-soft);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font-size: 12px;
+    color: var(--ink-soft);
+    cursor: pointer;
+  }
+  .pager .nav-btn:hover { background: var(--surface); }
+  .pager .export {
+    padding: 4px 10px;
+    background: var(--ink);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex; align-items: center; gap: 4px;
+  }
+
+  /* Detail panel */
+  .detail-panel {
+    position: absolute;
+    top: 60px; right: 12px; bottom: 80px;
+    width: 340px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    box-shadow: var(--shadow-md);
+    padding: 14px;
+    overflow: auto;
+  }
+  .detail-photos {
+    display: flex; gap: 6px;
+    margin-bottom: 12px;
+    overflow-x: auto;
+  }
+  .detail-photos img {
+    width: 96px; height: 72px;
+    object-fit: cover;
+    border-radius: 8px;
+    flex-shrink: 0;
+    background: var(--line-soft);
+  }
+  .detail-photos img.more {
+    width: 96px; height: 72px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--ink);
+    color: white;
+    font-weight: 600;
+    font-size: 12px;
+    border-radius: 8px;
+  }
+  .detail-addr {
+    font-weight: 600;
+    font-size: 14px;
+    margin-bottom: 4px;
+  }
+  .detail-sub {
+    color: var(--muted);
+    font-size: 12px;
+    margin-bottom: 12px;
+  }
+  .detail-price {
+    display: flex; align-items: baseline; gap: 8px;
+    margin-bottom: 12px;
+  }
+  .detail-price .p { font-size: 20px; font-weight: 700; color: var(--ink); }
+  .detail-price .pm2 { color: var(--muted); font-size: 12px; }
+  .detail-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .detail-stat {
+    background: var(--line-soft);
+    border-radius: 8px;
+    padding: 8px;
+  }
+  .detail-stat .v { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .detail-stat .l { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .detail-actions {
+    display: flex; gap: 6px;
+  }
+  .detail-actions .btn {
+    flex: 1;
+    padding: 8px;
+    border: none;
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 4px;
+  }
+  .detail-actions .btn.primary { background: var(--ink); color: white; }
+  .detail-actions .btn.ghost { background: var(--line-soft); color: var(--ink); }
+
+  /* Annotations */
+  .annot {
+    position: absolute;
+    background: var(--warn);
+    color: var(--ink);
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    box-shadow: var(--shadow-md);
+    z-index: 10;
+    pointer-events: none;
+    line-height: 1.3;
+    max-width: 200px;
+  }
+  .annot::after {
+    content: '';
+    position: absolute;
+    width: 0; height: 0;
+    border: 6px solid transparent;
+  }
+  .annot.a1 { top: 18%; right: 4%; }
+  .annot.a1::after { right: -12px; top: 50%; transform: translateY(-50%); border-left-color: var(--warn); }
+  .annot.a2 { top: 38%; left: 32%; }
+  .annot.a2::after { left: 50%; bottom: -12px; transform: translateX(-50%); border-top-color: var(--warn); }
+  .annot.a3 { bottom: 30%; right: 20%; }
+  .annot.a3::after { right: -12px; top: 50%; transform: translateY(-50%); border-left-color: var(--warn); }
+
+  /* small svg icons */
+  svg.icon { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  svg.icon.s { width: 14px; height: 14px; }
+  svg.icon.xs { width: 12px; height: 12px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- TOPBAR ────────────────────────────────────────────── -->
+  <header class="topbar">
+    <div class="logo">
+      <svg class="icon" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+      Flipper
+    </div>
+    <div class="stats">
+      <div class="stat active">
+        <svg class="icon xs" viewBox="0 0 24 24" style="color:var(--rose)"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="3" fill="currentColor"></circle></svg>
+        <span class="num active">5 227</span>
+        <span class="lbl">активных</span>
+      </div>
+      <div class="stat deact">
+        <svg class="icon xs" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle></svg>
+        <span class="num">233 314</span>
+        <span class="lbl">снято</span>
+      </div>
+      <div class="stat houses">
+        <svg class="icon xs" viewBox="0 0 24 24" style="color:var(--indigo)"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
+        <span class="num houses">30 868</span>
+        <span class="lbl">домов</span>
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <div class="search">
+      <svg class="icon s" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+      <input placeholder="Адрес, метро, координаты…">
+    </div>
+    <button class="icon-btn"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></button>
+  </header>
+
+  <!-- SPLIT PANE ────────────────────────────────────────── -->
+  <div class="split">
+    <!-- LEFT: MAP ────────────────────────────────────────── -->
+    <div class="map-pane">
+      <div class="map-bg"></div>
+      <div class="river"></div>
+      <div class="road h1"></div>
+      <div class="road h2"></div>
+      <div class="road v1"></div>
+      <div class="road v2"></div>
+
+      <!-- fake markers -->
+      <div class="marker" style="left:25%; top:30%">5</div>
+      <div class="marker" style="left:35%; top:42%">2</div>
+      <div class="marker pulsing" style="left:50%; top:55%; background:var(--rose)">12</div>
+      <div class="marker m2" style="left:62%; top:38%">8</div>
+      <div class="marker m3" style="left:70%; top:60%">15</div>
+      <div class="marker m4" style="left:18%; top:65%"></div>
+      <div class="marker m4" style="left:22%; top:75%"></div>
+      <div class="marker" style="left:75%; top:30%">3</div>
+      <div class="marker m2" style="left:80%; top:50%">6</div>
+      <div class="marker" style="left:42%; top:25%">4</div>
+      <div class="marker m4" style="left:15%; top:45%"></div>
+      <div class="marker" style="left:55%; top:75%">7</div>
+      <div class="marker m2" style="left:60%; top:22%">1</div>
+
+      <div class="map-controls">
+        <button class="map-btn"><svg class="icon" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></button>
+        <button class="map-btn"><svg class="icon" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"></line></svg></button>
+        <button class="map-btn" style="margin-top:8px"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v4M12 18v4M2 12h4M18 12h4"></path></svg></button>
+      </div>
+
+      <div class="map-legend">
+        <h4>Маркеры</h4>
+        <div class="row"><span class="dot r"></span> только активные</div>
+        <div class="row"><span class="dot r"></span> активные + снятые</div>
+        <div class="row"><span class="dot w"></span> только снятые</div>
+        <div class="row"><span class="dot k"></span> 10+ объявлений</div>
+        <div class="row"><span class="dot g"></span> без объявлений</div>
+      </div>
+      <div class="map-attrib">© OpenStreetMap</div>
+
+      <!-- ANNOTATIONS for the wireframe -->
+      <div class="annot a1">🖱 Клик по строке<br>→ пульс маркера<br>+ фокус сюда</div>
+      <div class="annot a2">↕ Hover по строке<br>→ мини-pin без клика</div>
+      <div class="annot a3">Карта не прячется<br>когда работаешь с таблицей</div>
+    </div>
+
+    <!-- RIGHT: TABLE PANE ───────────────────────────────── -->
+    <div class="table-pane">
+      <div class="pane-header">
+        <div class="tabs">
+          <div class="tab active">Активные <span class="badge">5 227</span></div>
+          <div class="tab">Снято <span class="badge">18 375</span></div>
+          <div class="tab">Скрытые <span class="badge">173 536</span></div>
+          <div class="tab">Дома <span class="badge">30 868</span></div>
+        </div>
+        <div class="filters">
+          <div class="filter-chip">
+            <span class="lbl">Комнат</span>
+            <span class="val">1, 2</span>
+            <svg class="icon xs caret" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </div>
+          <div class="filter-chip">
+            <span class="lbl">Цена</span>
+            <span class="val">5–15 млн</span>
+            <svg class="icon xs caret" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </div>
+          <div class="filter-chip">
+            <span class="lbl">Площадь</span>
+            <span class="val">30–80 м²</span>
+            <svg class="icon xs caret" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </div>
+          <div class="filter-chip">
+            <span class="lbl">Дней на рынке</span>
+            <span class="val">≤ 60</span>
+            <svg class="icon xs caret" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </div>
+          <div class="filter-chip">
+            <span class="lbl">С фото</span>
+            <svg class="icon xs" viewBox="0 0 24 24" style="color:var(--primary)"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          </div>
+          <div class="filter-chip">
+            <span class="lbl">Источник</span>
+            <span class="val">все</span>
+            <svg class="icon xs caret" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </div>
+          <button class="filter-reset">Сбросить</button>
+        </div>
+      </div>
+
+      <div class="summary">
+        <span>Найдено <b>1 247</b></span>
+        <span class="sep">·</span>
+        <span>медиана <b>280 000 ₽/м²</b></span>
+        <span class="sep">·</span>
+        <span>P25 <b>245k</b> · P75 <b>380k</b></span>
+        <span class="sep">·</span>
+        <span>среднее дней <b>23</b></span>
+        <span class="sep">·</span>
+        <span>с <b>авансом</b> <b style="color:var(--rose)">163</b></span>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:32px"><input type="checkbox"></th>
+              <th>Адрес</th>
+              <th>Район</th>
+              <th class="num"><span class="sort">₽/м² ↓</span></th>
+              <th class="num">Цена</th>
+              <th class="num">Площадь</th>
+              <th class="num">Этаж</th>
+              <th class="num">Комнат</th>
+              <th class="num">Дней</th>
+              <th>Ремонт</th>
+              <th>Ист.</th>
+              <th style="width:32px"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="hot">
+              <td><input type="checkbox"></td>
+              <td class="addr">Москва, ул. Льва Толстого, 7</td>
+              <td class="district">Хамовники · ЦАО</td>
+              <td class="num">231 000</td>
+              <td class="num">12 750 000</td>
+              <td class="num">55.2</td>
+              <td class="num">5 / 9</td>
+              <td class="num">2</td>
+              <td class="num" style="color:var(--warn)">87</td>
+              <td>Без ремонта</td>
+              <td><span class="src avans">Аванс</span></td>
+              <td><svg class="icon xs icon-link" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></td>
+            </tr>
+            <tr>
+              <td><input type="checkbox"></td>
+              <td class="addr">Москва, Комсомольский пр-кт, 3</td>
+              <td class="district">Хамовники · ЦАО</td>
+              <td class="num">245 000</td>
+              <td class="num">17 150 000</td>
+              <td class="num">70.0</td>
+              <td class="num">7 / 14</td>
+              <td class="num">3</td>
+              <td class="num">12</td>
+              <td>Евроремонт</td>
+              <td><span class="src cian">ЦИАН</span></td>
+              <td><svg class="icon xs icon-link" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></td>
+            </tr>
+            <tr>
+              <td><input type="checkbox"></td>
+              <td class="addr">Москва, ул. 1905 года, 25</td>
+              <td class="district">Пресненский · ЦАО</td>
+              <td class="num">267 000</td>
+              <td class="num">18 420 000</td>
+              <td class="num">69.0</td>
+              <td class="num">12 / 17</td>
+              <td class="num">3</td>
+              <td class="num">14</td>
+              <td>Косметический</td>
+              <td><span class="src cian">ЦИАН</span></td>
+              <td><svg class="icon xs icon-link" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></td>
+            </tr>
+            <tr>
+              <td><input type="checkbox"></td>
+              <td class="addr">Москва, Ленинский пр-кт, 32</td>
+              <td class="district">Гагаринский · ЮЗАО</td>
+              <td class="num">288 000</td>
+              <td class="num">23 040 000</td>
+              <td class="num">80.0</td>
+              <td class="num">3 / 9</td>
+              <td class="num">3</td>
+              <td class="num">4</td>
+              <td>Дизайнерский</td>
+              <td><span class="src cian">ЦИАН</span></td>
+              <td><svg class="icon xs icon-link" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></td>
+            </tr>
+            <tr>
+              <td><input type="checkbox"></td>
+              <td class="addr">Москва, ул. Девятая Рота, 2к1</td>
+              <td class="district">Преображенское · ВАО</td>
+              <td class="num">301 000</td>
+              <td class="num">10 535 000</td>
+              <td class="num">35.0</td>
+              <td class="num">9 / 14</td>
+              <td class="num">1</td>
+              <td class="num" style="color:var(--warn)">63</td>
+              <td>Косметический</td>
+              <td><span class="src cian">ЦИАН</span></td>
+              <td><svg class="icon xs icon-link" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></td>
+            </tr>
+            <tr>
+              <td><input type="checkbox"></td>
+              <td class="addr">Москва, ул. Академика Королёва, 12</td>
+              <td class="district">Останкинский · СВАО</td>
+              <td class="num">312 000</td>
+              <td class="num">14 040 000</td>
+              <td class="num">45.0</td>
+              <td class="num">14 / 17</td>
+              <td class="num">2</td>
+              <td class="num">21</td>
+              <td>Без ремонта</td>
+              <td><span class="src cian">ЦИАН</span></td>
+              <td><svg class="icon xs icon-link" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></td>
+            </tr>
+            <tr>
+              <td><input type="checkbox"></td>
+              <td class="addr">Москва, Зелёный пр-кт, 18</td>
+              <td class="district">Новогиреево · ВАО</td>
+              <td class="num">328 000</td>
+              <td class="num">8 200 000</td>
+              <td class="num">25.0</td>
+              <td class="num">2 / 5</td>
+              <td class="num">1</td>
+              <td class="num">3</td>
+              <td>Евроремонт</td>
+              <td><span class="src cian">ЦИАН</span></td>
+              <td><svg class="icon xs icon-link" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></td>
+            </tr>
+            <tr>
+              <td><input type="checkbox"></td>
+              <td class="addr">Москва, Щёлковское ш., 12</td>
+              <td class="district">Северное Измайлово · ВАО</td>
+              <td class="num">340 000</td>
+              <td class="num">11 900 000</td>
+              <td class="num">35.0</td>
+              <td class="num">4 / 9</td>
+              <td class="num">1</td>
+              <td class="num">9</td>
+              <td>Косметический</td>
+              <td><span class="src cian">ЦИАН</span></td>
+              <td><svg class="icon xs icon-link" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></td>
+            </tr>
+            <tr>
+              <td><input type="checkbox"></td>
+              <td class="addr">Москва, Рублёвское ш., 18к2</td>
+              <td class="district">Кунцево · ЗАО</td>
+              <td class="num">355 000</td>
+              <td class="num">14 200 000</td>
+              <td class="num">40.0</td>
+              <td class="num">8 / 12</td>
+              <td class="num">1</td>
+              <td class="num">17</td>
+              <td>Евроремонт</td>
+              <td><span class="src cian">ЦИАН</span></td>
+              <td><svg class="icon xs icon-link" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></td>
+            </tr>
+            <tr>
+              <td><input type="checkbox"></td>
+              <td class="addr">Москва, ул. Плющиха, 16</td>
+              <td class="district">Хамовники · ЦАО</td>
+              <td class="num">365 000</td>
+              <td class="num">29 200 000</td>
+              <td class="num">80.0</td>
+              <td class="num">6 / 8</td>
+              <td class="num">3</td>
+              <td class="num">28</td>
+              <td>Дизайнерский</td>
+              <td><span class="src cian">ЦИАН</span></td>
+              <td><svg class="icon xs icon-link" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></td>
+            </tr>
+            <tr>
+              <td><input type="checkbox"></td>
+              <td class="addr">Москва, Хорошёвское ш., 12а</td>
+              <td class="district">Хорошёвский · САО</td>
+              <td class="num">378 000</td>
+              <td class="num">15 120 000</td>
+              <td class="num">40.0</td>
+              <td class="num">11 / 17</td>
+              <td class="num">1</td>
+              <td class="num">7</td>
+              <td>Евроремонт</td>
+              <td><span class="src cian">ЦИАН</span></td>
+              <td><svg class="icon xs icon-link" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></td>
+            </tr>
+            <tr>
+              <td><input type="checkbox"></td>
+              <td class="addr">Москва, ул. Беговая, 12</td>
+              <td class="district">Беговой · САО</td>
+              <td class="num">395 000</td>
+              <td class="num">15 800 000</td>
+              <td class="num">40.0</td>
+              <td class="num">3 / 6</td>
+              <td class="num">1</td>
+              <td class="num" style="color:var(--warn)">74</td>
+              <td>Без ремонта</td>
+              <td><span class="src avans">Аванс</span></td>
+              <td><svg class="icon xs icon-link" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="pager">
+        <span class="page-info">1–50 из 1 247</span>
+        <button class="nav-btn">‹ Назад</button>
+        <button class="nav-btn">1</button>
+        <button class="nav-btn" style="background:var(--ink); color:white">2</button>
+        <button class="nav-btn">3</button>
+        <span class="page-info">… 25</span>
+        <button class="nav-btn">Вперёд ›</button>
+        <span class="grow"></span>
+        <span class="page-info">50 на стр.</span>
+        <button class="export">
+          <svg class="icon xs" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          Export CSV
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

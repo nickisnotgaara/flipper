@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import useEmblaCarousel from 'embla-carousel-react';
+import { Button } from '@heroui/react';
 import { PlanIcon, ChevronLeftIcon, ChevronRightIcon } from './icons';
 import PhotoGallery from './PhotoGallery';
 
@@ -84,14 +85,10 @@ export default function PhotoCarousel({
 
   if (list.length === 0) return null;
 
-  const scrollPrev = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const scrollPrev = () => {
     emblaApi?.scrollPrev();
   };
-  const scrollNext = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const scrollNext = () => {
     emblaApi?.scrollNext();
   };
   const onThumbClick = (e: React.MouseEvent, _p: Photo, i: number) => {
@@ -160,14 +157,16 @@ export default function PhotoCarousel({
                 key={p.id ?? i}
                 className="embla-slide shrink-0 basis-[calc((100%-8px)/3)] min-w-0"
               >
-                {/* Use a <button> not <a> so the thumbnail click can sit
-                    inside the card-level <a> in HousePanel without nesting
-                    anchors (invalid HTML). The button calls window.open
-                    to open the full-size image in a new tab. */}
-                <button
-                  type="button"
-                  onClick={(e) => onThumbClick(e, p, i)}
-                  className="block relative aspect-square w-full overflow-hidden rounded-xl bg-default-100 group/thumb cursor-pointer p-0 border-0"
+                {/* Use a HeroUI <Button> (rendered as <button>) so the
+                    thumbnail click can sit inside the card-level <a> in
+                    HousePanel without nesting anchors (invalid HTML).
+                    The button opens the in-app gallery. */}
+                <Button
+                  isIconOnly
+                  radius="lg"
+                  variant="flat"
+                  onPress={(e) => onThumbClick(e as any, p, i)}
+                  className="relative aspect-square w-full !p-0 !min-w-0 overflow-hidden rounded-xl bg-default-100 group/thumb cursor-pointer data-[hover=true]:bg-default-100"
                   title={p.isCianLayout ? 'Планировка' : `Фото ${i + 1}`}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -187,7 +186,7 @@ export default function PhotoCarousel({
                       план
                     </span>
                   )}
-                </button>
+                </Button>
               </div>
             );
           })}
@@ -195,24 +194,30 @@ export default function PhotoCarousel({
       </div>
 
       {canPrev && (
-        <button
-          type="button"
+        <Button
+          isIconOnly
+          size="sm"
+          radius="full"
+          variant="solid"
           aria-label="Предыдущие фото"
-          onClick={scrollPrev}
-          className="absolute left-1 top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white/95 hover:bg-white shadow-card flex items-center justify-center text-default-700 transition"
+          onPress={scrollPrev}
+          className="absolute left-1 top-1/2 -translate-y-1/2 z-10 w-7 h-7 min-w-7 !p-0 bg-white/95 hover:bg-white shadow-card text-default-700 transition data-[hover=true]:bg-white"
         >
           <ChevronLeftIcon />
-        </button>
+        </Button>
       )}
       {canNext && (
-        <button
-          type="button"
+        <Button
+          isIconOnly
+          size="sm"
+          radius="full"
+          variant="solid"
           aria-label="Следующие фото"
-          onClick={scrollNext}
-          className="absolute right-1 top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white/95 hover:bg-white shadow-card flex items-center justify-center text-default-700 transition"
+          onPress={scrollNext}
+          className="absolute right-1 top-1/2 -translate-y-1/2 z-10 w-7 h-7 min-w-7 !p-0 bg-white/95 hover:bg-white shadow-card text-default-700 transition data-[hover=true]:bg-white"
         >
           <ChevronRightIcon />
-        </button>
+        </Button>
       )}
 
       {/* Dot indicators only if there are 4+ photos (3 is the visible
