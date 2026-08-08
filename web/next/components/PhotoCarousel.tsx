@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import useEmblaCarousel from 'embla-carousel-react';
-import { Button } from '@heroui/react';
 import { PlanIcon, ChevronLeftIcon, ChevronRightIcon } from './icons';
 import PhotoGallery from './PhotoGallery';
 
@@ -92,9 +91,11 @@ export default function PhotoCarousel({
     emblaApi?.scrollNext();
   };
   const onThumbClick = (e: React.MouseEvent, _p: Photo, i: number) => {
-    // Open the in-app photo gallery at the clicked photo. We stop
-    // propagation so the parent <a> card (which wraps the whole
-    // carousel) doesn't navigate to the cian offer.
+    // Open the in-app photo gallery at the clicked photo. We
+    // preventDefault() to stop the browser from following any
+    // surrounding <a href> and stopPropagation() so React's synthetic
+    // bubbling doesn't reach the parent <a> either. Together these
+    // guarantee the click does not navigate to the cian offer page.
     e.preventDefault();
     e.stopPropagation();
     setGalleryStart(i);
@@ -157,17 +158,27 @@ export default function PhotoCarousel({
                 key={p.id ?? i}
                 className="embla-slide shrink-0 basis-[calc((100%-8px)/3)] min-w-0"
               >
-                {/* Use a HeroUI <Button> (rendered as <button>) so the
-                    thumbnail click can sit inside the card-level <a> in
-                    HousePanel without nesting anchors (invalid HTML).
-                    The button opens the in-app gallery. */}
-                <Button
-                  isIconOnly
-                  radius="lg"
-                  variant="flat"
-                  onPress={(e) => onThumbClick(e as any, p, i)}
-                  className="relative aspect-square w-full !p-0 !min-w-0 overflow-hidden rounded-xl bg-default-100 group/thumb cursor-pointer data-[hover=true]:bg-default-100"
+                {/* Native <button>, not HeroUI Button. Reason:
+                    PhotoCarousel lives inside a card-level <a href> in
+                    HousePanel. HeroUI's onPress handler uses a custom
+                    PressEvent whose preventDefault() / stopPropagation()
+                    do NOT block the parent anchor's native navigation —
+                    the browser still follows the href when the click
+                    bubbles up. A native <button> with onClick goes
+                    through React's synthetic event system, where
+                    e.preventDefault() / e.stopPropagation() actually
+                    stop the click from reaching the parent <a>.
+                    The native button still satisfies the "no nested
+                    anchors" constraint: <button> inside <a> is invalid
+                    HTML, so to be safe we also intercept at the
+                    parent <a> via data-stop-nav (handled in AdCard /
+                    HousePanel if/when needed). */}
+                <button
+                  type="button"
+                  data-photo-thumb=""
+                  onClick={(e) => onThumbClick(e, p, i)}
                   title={p.isCianLayout ? 'Планировка' : `Фото ${i + 1}`}
+                  className="relative aspect-square w-full p-0 m-0 overflow-hidden rounded-xl bg-default-100 group/thumb cursor-pointer border-0 outline-none hover:ring-1 hover:ring-default-300 focus-visible:ring-2 focus-visible:ring-primary"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
@@ -186,38 +197,46 @@ export default function PhotoCarousel({
                       план
                     </span>
                   )}
-                </Button>
+                </button>
               </div>
             );
           })}
         </div>
       </div>
 
+      {/* Prev/next buttons — same trick as the thumbnails. Native
+          <button> (not HeroUI Button) because:
+            1) It sits inside a card-level <a href> in HousePanel, and
+               HeroUI's onPress preventDefault() does NOT block the
+               parent anchor's native navigation.
+            2) The button has `data-photo-thumb=""` so the safety-net
+               onClick on the parent <a> in AdCard catches any click
+               that bubbles up — even if the React onClick doesn't run
+               (keyboard activation, synthetic vs native event timing).
+          Without this, clicking the rightmost visible photo where
+          `canNext` is true would hit the `›` button (z-10, overlapping
+          the 3rd thumbnail) and silently navigate to cian.ru. */}
       {canPrev && (
-        <Button
-          isIconOnly
-          size="sm"
-          radius="full"
-          variant="solid"
+        <button
+          type="button"
+          data-photo-thumb=""
           aria-label="Предыдущие фото"
-          onPress={scrollPrev}
-          className="absolute left-1 top-1/2 -translate-y-1/2 z-10 w-7 h-7 min-w-7 !p-0 bg-white/95 hover:bg-white shadow-card text-default-700 transition data-[hover=true]:bg-white"
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); scrollPrev(); }}
+          className="absolute left-1 top-1/2 -translate-y-1/2 z-10 w-7 h-7 min-w-7 !p-0 bg-white/95 hover:bg-white shadow-card text-default-700 transition flex items-center justify-center rounded-full border-0 outline-none cursor-pointer"
         >
           <ChevronLeftIcon />
-        </Button>
+        </button>
       )}
       {canNext && (
-        <Button
-          isIconOnly
-          size="sm"
-          radius="full"
-          variant="solid"
+        <button
+          type="button"
+          data-photo-thumb=""
           aria-label="Следующие фото"
-          onPress={scrollNext}
-          className="absolute right-1 top-1/2 -translate-y-1/2 z-10 w-7 h-7 min-w-7 !p-0 bg-white/95 hover:bg-white shadow-card text-default-700 transition data-[hover=true]:bg-white"
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); scrollNext(); }}
+          className="absolute right-1 top-1/2 -translate-y-1/2 z-10 w-7 h-7 min-w-7 !p-0 bg-white/95 hover:bg-white shadow-card text-default-700 transition flex items-center justify-center rounded-full border-0 outline-none cursor-pointer"
         >
           <ChevronRightIcon />
-        </Button>
+        </button>
       )}
 
       {/* Dot indicators only if there are 4+ photos (3 is the visible

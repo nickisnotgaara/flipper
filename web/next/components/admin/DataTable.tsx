@@ -67,6 +67,18 @@ export type DataTableProps<T extends Record<string, any>> = {
   totalLabel?: string;
   rowHref?: (row: T) => string | null;
   idKey?: string;
+  /**
+   * Visual chrome:
+   *   - 'default' — sits inside a card with rounded corners and a
+   *     hero search/filter row at the top. Used on the standalone
+   *     dashboard tables and analytics pages.
+   *   - 'excel'   — full-bleed Google-Sheets style: no card border,
+   *     tighter rows, plain 1px grid lines, hero search collapses
+   *     into a single inline row, the table fills the parent height
+   *     instead of using calc(100vh - 380px). Used by the /tables
+   *     tabbed workbook page.
+   */
+  chrome?: 'default' | 'excel';
 };
 
 type ApiPage<T> = {
@@ -133,7 +145,9 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
     totalLabel = 'строк',
     rowHref,
     idKey = 'id',
+    chrome = 'default',
   } = props;
+  const isExcel = chrome === 'excel';
 
   const queryClient = useQueryClient();
 
@@ -318,7 +332,7 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
   });
 
   const parentRef = useRef<HTMLDivElement>(null);
-  const rowHeight = 44;
+  const rowHeight = isExcel ? 32 : 44;
   const virtualizer = useVirtualizer({
     count: allRows.length,
     getScrollElement: () => parentRef.current,
@@ -513,18 +527,34 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
       </div>
 
       {/* ========== Table ========== */}
-      <div className="bg-[var(--paper-card)] border border-[var(--rule)] rounded-lg overflow-hidden">
+      <div
+        className={[
+          'overflow-hidden',
+          isExcel
+            ? 'h-full bg-[var(--paper-card)]'
+            : 'bg-[var(--paper-card)] border border-[var(--rule)] rounded-lg',
+        ].join(' ')}
+      >
         <div
           className="overflow-auto"
-          style={{ height: 'calc(100vh - 270px)' }}
+          style={{ height: isExcel ? '100%' : 'calc(100vh - 270px)' }}
           ref={parentRef}
         >
-          <table className="w-full text-[13px] border-collapse">
+          <table
+            className={[
+              'w-full text-[13px] border-collapse',
+              isExcel ? 'border-spacing-0' : '',
+            ].join(' ')}
+            style={isExcel ? { borderCollapse: 'separate', borderSpacing: 0 } : undefined}
+          >
             <thead className="sticky top-0 z-10">
               {table.getHeaderGroups().map((hg) => (
                 <tr
                   key={hg.id}
-                  className="bg-[var(--paper-2)] border-b border-[var(--rule)]"
+                  className={[
+                    'bg-[var(--paper-2)]',
+                    isExcel ? '' : 'border-b border-[var(--rule)]',
+                  ].join(' ')}
                 >
                   {hg.headers.map((h) => {
                     const canSort = h.column.getCanSort();
@@ -536,7 +566,16 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
                     return (
                       <th
                         key={h.id}
-                        style={w ? { width: w } : undefined}
+                        style={Object.assign(
+                          {},
+                          w ? { width: w } : null,
+                          isExcel
+                            ? {
+                                borderRight: '1px solid var(--rule-soft)',
+                                borderBottom: '1px solid var(--rule)',
+                              }
+                            : null,
+                        )}
                         className={[
                           'px-3 py-2.5 text-left font-medium text-[11px] uppercase tracking-wider text-[var(--ink-mute)] select-none whitespace-nowrap',
                           canSort ? 'cursor-pointer hover:text-[var(--ink)] transition-colors' : '',
@@ -621,8 +660,13 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
                         width: '100%',
                       }}
                       className={[
-                        'border-b border-[var(--rule-soft)] transition-colors group/row',
-                        isSelected ? 'bg-[var(--highlight)]' : 'hover:bg-[var(--paper-2)]',
+                        'transition-colors group/row',
+                        isExcel ? '' : 'border-b border-[var(--rule-soft)]',
+                        isSelected
+                          ? 'bg-[var(--highlight)]'
+                          : isExcel
+                            ? 'hover:bg-[var(--paper-2)]'
+                            : 'hover:bg-[var(--paper-2)]',
                         rowHref ? 'cursor-pointer' : '',
                       ].join(' ')}
                       onClick={(e) => {
@@ -647,9 +691,17 @@ export default function DataTable<T extends Record<string, any>>(props: DataTabl
                         return (
                           <td
                             key={cell.id}
+                            style={
+                              isExcel
+                                ? {
+                                    borderRight: '1px solid var(--rule-soft)',
+                                    borderBottom: '1px solid var(--rule-soft)',
+                                  }
+                                : undefined
+                            }
                             className={[
                               'px-3 align-middle relative',
-                              editable ? 'p-0' : 'py-2',
+                              editable ? 'p-0' : isExcel ? 'py-1.5' : 'py-2',
                             ].join(' ')}
                           >
                             {isSelected && i === 0 ? (

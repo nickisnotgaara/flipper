@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import {
   Home,
   Map,
@@ -29,13 +29,13 @@ const NAV: NavItem[] = [
   { label: 'Карта', href: '/map', icon: Map },
   {
     label: 'Таблицы',
-    href: '/tables/active',
+    href: '/tables',
     icon: Table2,
     subItems: [
-      { label: 'Активные', href: '/tables/active', badge: 5_227 },
-      { label: 'Снято', href: '/tables/sold', badge: 18_375 },
-      { label: 'Скрытые', href: '/tables/hidden', badge: 173_536 },
-      { label: 'Дома', href: '/tables/houses', badge: 30_868 },
+      { label: 'Активные', href: '/tables?tab=active', badge: 5_227 },
+      { label: 'Снято', href: '/tables?tab=sold', badge: 18_375 },
+      { label: 'Скрытые', href: '/tables?tab=hidden', badge: 173_536 },
+      { label: 'Дома', href: '/tables?tab=houses', badge: 30_868 },
     ],
   },
   { label: 'Аналитика', href: '/analytics', icon: BarChart3 },
@@ -51,11 +51,27 @@ function fmt(n: number | string): string {
 
 export default function Sidebar() {
   const pathname = usePathname() || '/';
+  const searchParams = useSearchParams();
+  const currentTab = pathname === '/tables' ? searchParams.get('tab') || 'active' : null;
   const [tablesOpen, setTablesOpen] = useState(pathname.startsWith('/tables'));
 
   const isActive = (item: NavItem) => {
-    if (item.href === '/tables/active' && pathname.startsWith('/tables')) return true;
+    // Tables is a single /tables page with ?tab=… query state, so
+    // the parent "Таблицы" lights up whenever we're on /tables, and
+    // each sub-item highlights when its specific ?tab=… matches.
+    if (item.subItems) {
+      return pathname === '/tables' || pathname.startsWith('/tables/');
+    }
     return pathname === item.href || pathname.startsWith(item.href + '/');
+  };
+
+  const isSubActive = (subHref: string) => {
+    // subHref is shaped like /tables?tab=active — extract the
+    // ?tab=… and compare to the current search params.
+    if (pathname !== '/tables') return false;
+    const m = subHref.match(/[?&]tab=([^&]+)/);
+    if (!m) return currentTab === null;
+    return currentTab === m[1];
   };
 
   return (
@@ -82,7 +98,7 @@ export default function Sidebar() {
           const active = isActive(item);
 
           if (item.subItems) {
-            const subActive = item.subItems.some((s) => pathname === s.href);
+            const subActive = item.subItems.some((s) => isSubActive(s.href));
             return (
               <div key={item.href}>
                 <Button
@@ -109,7 +125,7 @@ export default function Sidebar() {
                 {tablesOpen && (
                   <div className="ml-3 my-0.5 border-l border-[var(--rule)] pl-1">
                     {item.subItems.map((sub) => {
-                      const subIsActive = pathname === sub.href;
+                      const subIsActive = isSubActive(sub.href);
                       return (
                         <Link
                           key={sub.href}

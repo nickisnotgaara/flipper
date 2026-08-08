@@ -488,6 +488,19 @@ function AdCard({ ad, kind }: { ad: Ad; kind: 'active' | 'deactivated' }) {
       // browsers that ignore `draggable` on anchors.
       draggable={false}
       onDragStart={(e) => e.preventDefault()}
+      // Safety net: if a click bubbles up from inside the photo
+      // carousel ([data-photo-thumb] is set by PhotoCarousel on
+      // each thumbnail button), don't follow the link. PhotoCarousel's
+      // own onClick also calls stopPropagation + preventDefault, but
+      // this is the second line of defense in case a browser-specific
+      // path lets the click reach the anchor (e.g. keyboard activation
+      // of the parent anchor via Enter while focus is on a thumb).
+      onClick={(e) => {
+        const t = e.target as HTMLElement | null;
+        if (t && t.closest('[data-photo-thumb]')) {
+          e.preventDefault();
+        }
+      }}
       className={`block bg-white rounded-2xl border border-default-200 shadow-card hover:shadow-card-lg transition-shadow group overflow-hidden ${
         isDeactivated ? 'opacity-80' : ''
       }`}
