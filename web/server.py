@@ -1811,6 +1811,16 @@ _TABLE_CONFIGS = {
                   "END AS title, "
                   "publish_date, filter_id, house_id",
         "search_cols": ["external_id", "district", "okrug", "metro_station", "raw_data"],
+        # Editable columns: admin can correct CIAN auto-fill or reassign.
+        # `is_active` is the only "going-forward" toggle per dev policy.
+        "editable": {
+            "filter_id": int,
+            "renovation": str,
+            "district": str,
+            "okrug": str,
+            "metro_station": str,
+            "metro_walk_time": int,
+        },
     },
     "sold": {
         "table": "sold_ads",
@@ -1823,6 +1833,9 @@ _TABLE_CONFIGS = {
                   "END AS title, "
                   "house_id",
         "search_cols": ["external_id", "raw_data"],
+        "editable": {
+            "renovation": str,
+        },
     },
     "hidden": {
         "table": "sold_ads",
@@ -1835,6 +1848,9 @@ _TABLE_CONFIGS = {
                   "END AS title, "
                   "house_id",
         "search_cols": ["external_id", "raw_data"],
+        "editable": {
+            "renovation": str,
+        },
     },
     "houses": {
         "table": "houses",
@@ -1846,6 +1862,16 @@ _TABLE_CONFIGS = {
                   "(SELECT COUNT(*) FROM sold_ads WHERE house_id = houses.id) AS deactivated_count",
         "search_cols": ["address", "street", "house_num", "series", "external_house_id"],
         "stats_cols": (),  # houses have no price/area
+        "editable": {
+            "address": str,
+            "street": str,
+            "house_num": str,
+            "year_built": int,
+            "levels": int,
+            "building_type": str,
+            "series": str,
+            "ceiling_height": float,
+        },
     },
 }
 
@@ -2096,6 +2122,143 @@ async def table_export(name: str, request: Request):
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{name}.csv"'},
     )
+
+
+# ---- Row editing (Google-Sheets-style cells) -------------------------------
+#
+# The DataTable is editable inline: click a cell, type, blur to save. We
+# whitelist per-table columns to avoid SQL injection and to keep the contract
+# obvious.  Only columns explicitly listed in cfg["editable"] are accepted;
+# anything else returns 400.
+#
+# We use asyncpg directly here (not SA Core) because the SA 2.0 async session
+# has a known issue with the dict → named-param binding for UPDATE statements
+# when the driver is asyncpg, so for one-off writes we go through conn.execute
+# of a parameterised text() statement and the same dict-bind pattern that
+# already works for SELECT above.
+
+
+@app.patch("/api/tables/{name}/rows/{row_id}")
+async def table_row_patch(name: str, row_id: int, request: Request):
+    """Update a single row. Body: {column: value, ...}.
+
+    Returns: {ok: True, row: <full row after update>} on success.
+    """
+    cfg = _table_query(name)
+    if not cfg:
+        raise HTTPException(status_code=404, detail=f"Unknown table '{name}'")
+    editable = cfg.get("editable") or {}
+    if not editable:
+        raise HTTPException(
+            status_code=400, detail=f"Table '{name}' has no editable columns"
+        )
+
+    body = await request.json()
+    if not isinstance(body, dict) or not body:
+        raise HTTPException(status_code=400, detail="Body must be a non-empty object")
+
+    # Reject unknown columns. Use explicit message so the UI can surface it.
+    bad = [k for k in body.keys() if k not in editable]
+    if bad:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Column(s) not editable: {', '.join(sorted(bad))}",
+        )
+
+    # Coerce and validate each value against its declared Python type.
+    coerced: dict = {}
+    for col, raw in body.items():
+        cast = editable[col]
+        if raw is None:
+            coerced[col] = None
+            continue
+        if cast is int:
+            try:
+                v = int(raw)
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=400, detail=f"{col}: expected int, got {raw!r}"
+                )
+            coerced[col] = v
+        elif cast is float:
+            try:
+                coerced[col] = float(raw)
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=400, detail=f"{col}: expected number, got {raw!r}"
+                )
+        elif cast is str:
+            coerced[col] = "" if raw is None else str(raw)
+        elif cast is bool:
+            coerced[col] = bool(raw)
+        else:
+            coerced[col] = raw
+
+    from sqlalchemy import text as _text
+
+    # Build the SET clause with :p1, :p2, ... placeholders, mirroring the
+    # _fetch_table_rows pattern (and the SA 2.0 / asyncpg gotcha).
+    set_parts = []
+    set_params: dict = {}
+    where_params: dict = {}
+    _n = [0]
+
+    def _p():
+        _n[0] += 1
+        return f"p{_n[0]}"
+
+    for col, val in coerced.items():
+        pk = _p()
+        set_parts.append(f"{col} = :{pk}")
+        set_params[pk] = val
+
+    pk_where = _p()
+    where_params[pk_where] = row_id
+
+    set_sql = ", ".join(set_parts)
+    # Compose WHERE in the right order: id first, then optional source scope,
+    # then RETURNING. RETURNING must come last — appending anything after it
+    # makes Postgres parse it as part of the projection list (it tried to
+    # evaluate `id AND source = $3` and threw "AND must be boolean").
+    extra_where = ""
+    # Source-scope the UPDATE so users can't accidentally edit a row from a
+    # different source than the table tab is showing. The `source` filter is
+    # optional for houses (all sources).
+    if cfg.get("source_filter"):
+        # cfg["source_filter"] is always a `column = 'literal'` form in this
+        # codebase. Extract the column name and the literal so we can rebind.
+        column, literal = [s.strip() for s in cfg["source_filter"].split("=", 1)]
+        literal_value = literal.strip("'")
+        scope_pk = _p()
+        extra_where = f" AND {column} = :{scope_pk}"
+        where_params[scope_pk] = literal_value
+
+    update_sql = (
+        f"UPDATE {cfg['table']} SET {set_sql} "
+        f"WHERE id = :{pk_where}{extra_where} "
+        f"RETURNING id"
+    )
+
+    engine = get_engine()
+    async with engine.begin() as conn:
+        result = await conn.execute(_text(update_sql), {**set_params, **where_params})
+        ret = result.fetchone()
+        if not ret:
+            raise HTTPException(
+                status_code=404, detail=f"Row {row_id} not found in '{name}'"
+            )
+
+        # Re-fetch the row in the same shape as _fetch_table_rows so the
+        # frontend can drop the new row straight into the table state.
+        sel_sql = f"SELECT {cfg['select']} FROM {cfg['table']} WHERE id = :pk"
+        row_result = await conn.execute(_text(sel_sql), {"pk": row_id})
+        cols = list(row_result.keys())
+        row_dict = dict(zip(cols, row_result.fetchone()))
+        for k, v in list(row_dict.items()):
+            if hasattr(v, "isoformat"):
+                row_dict[k] = v.isoformat()
+
+    return {"ok": True, "row": row_dict}
 
 
 # ---- Dashboard widgets ------------------------------------------------------

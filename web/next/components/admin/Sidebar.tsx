@@ -39,7 +39,7 @@ const NAV: NavItem[] = [
     ],
   },
   { label: 'Аналитика', href: '/analytics', icon: BarChart3 },
-  { label: 'Сохранённые фильтры', href: '/filters', icon: Bookmark },
+  { label: 'Фильтры', href: '/filters', icon: Bookmark },
   { label: 'Pipeline', href: '/pipeline', icon: Activity },
   { label: 'Настройки', href: '/settings', icon: Settings },
 ];
@@ -59,23 +59,21 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className="w-60 shrink-0 h-screen sticky top-0 bg-[var(--paper-card)] border-r border-[var(--rule)] flex flex-col">
-      {/* Brand */}
-      <div className="px-4 pt-4 pb-3 border-b border-[var(--rule)]">
-        <Link href="/dashboard" className="flex items-center gap-2.5 group">
-          <div className="w-9 h-9 bg-[var(--ink)] rounded-md flex items-center justify-center group-hover:bg-[var(--ink-soft)] transition-colors">
-            <span className="font-display text-[var(--paper)] text-[15px] font-bold leading-none">Ф</span>
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="font-display text-[15px] text-[var(--ink)] font-semibold leading-none">
-              Flipper
-            </div>
-            <div className="text-[11px] text-[var(--ink-mute)] mt-1">
-              Панель управления
-            </div>
-          </div>
-        </Link>
-      </div>
+    <aside className="w-56 shrink-0 h-screen sticky top-0 bg-[var(--paper-card)] border-r border-[var(--rule)] flex flex-col">
+      {/* Brand — minimal */}
+      <Link
+        href="/dashboard"
+        className="flex items-center gap-2.5 h-14 px-4 border-b border-[var(--rule)]"
+      >
+        <div className="w-8 h-8 bg-[var(--ink)] rounded-md flex items-center justify-center">
+          <span className="font-display text-[var(--paper)] text-[14px] font-bold leading-none">
+            Ф
+          </span>
+        </div>
+        <span className="font-display text-[15px] text-[var(--ink)] font-semibold">
+          Flipper
+        </span>
+      </Link>
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto py-2">
@@ -109,7 +107,7 @@ export default function Sidebar() {
                   {item.label}
                 </Button>
                 {tablesOpen && (
-                  <div className="ml-4 my-0.5 border-l border-[var(--rule)] pl-1">
+                  <div className="ml-3 my-0.5 border-l border-[var(--rule)] pl-1">
                     {item.subItems.map((sub) => {
                       const subIsActive = pathname === sub.href;
                       return (
@@ -171,13 +169,6 @@ export default function Sidebar() {
           );
         })}
       </nav>
-
-      <div className="border-t border-[var(--rule)] px-4 py-3 flex items-center gap-2 text-[12px]">
-        <span className="w-2 h-2 rounded-full bg-[var(--gain)]" />
-        <span className="text-[var(--ink-soft)]">flippercrawl</span>
-        <span className="flex-1" />
-        <span className="text-[var(--gain)] font-medium">OK</span>
-      </div>
     </aside>
   );
 }

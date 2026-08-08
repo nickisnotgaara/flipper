@@ -2,11 +2,23 @@
 
 import { useMemo } from 'react';
 import Link from 'next/link';
-import { Image as ImageIcon, ExternalLink } from 'lucide-react';
+import { Chip } from '@heroui/react';
+import { ExternalLink } from 'lucide-react';
 import DataTable from '@/components/admin/DataTable';
 import type { FilterDef } from '@/components/admin/FilterPanel';
 
 const FILTERS: FilterDef[] = [
+  {
+    key: 'rooms',
+    label: 'Комнат',
+    group: 'Категории',
+    kind: 'multi',
+    options: [
+      { value: '1', label: '1' },
+      { value: '2', label: '2' },
+      { value: '3', label: '3' },
+    ],
+  },
   {
     key: 'price_min',
     label: 'Цена',
@@ -20,19 +32,23 @@ const FILTERS: FilterDef[] = [
     label: 'Цена',
     group: 'Цена',
     kind: 'range-max',
-    placeholder: '30 000 000',
+    placeholder: '20 000 000',
     unit: '₽',
   },
   {
-    key: 'rooms',
-    label: 'Комнат',
-    group: 'Категории',
+    key: 'days_max',
+    label: 'Дней',
+    group: 'Срок',
+    kind: 'range-max',
+    placeholder: '60',
+    unit: 'дн.',
+  },
+  {
+    key: 'source',
+    label: 'Источник',
+    group: 'Дополнительно',
     kind: 'multi',
-    options: [
-      { value: '1', label: '1' },
-      { value: '2', label: '2' },
-      { value: '3', label: '3' },
-    ],
+    options: [{ value: 'cian_active', label: 'ЦИАН' }],
   },
 ];
 
@@ -41,30 +57,20 @@ function fmt(n: number | null | undefined): string {
   return n.toLocaleString('ru-RU');
 }
 
-export default function HiddenPage() {
+export default function SoldPage() {
   const columns = useMemo(
     () => [
       {
-        id: 'thumb',
-        header: 'фото',
-        enableSorting: false,
-        cell: ({ row }: any) => (
-          <div className="w-9 h-7 border border-[var(--rule)] flex items-center justify-center text-[var(--ink-faint)] bg-[var(--paper-2)]">
-            <ImageIcon size={11} strokeWidth={1.75} />
-          </div>
-        ),
-      },
-      {
         id: 'title',
-        header: 'ID объявления',
-        accessorKey: 'external_id',
+        header: 'Адрес / ID',
+        accessorKey: 'title',
         cell: ({ row }: any) => (
-          <div className="min-w-[200px]">
-            <div className="font-mono tabular-nums text-[var(--ink)] font-medium text-[13px]">
-              #{row.original.external_id}
+          <div className="min-w-[220px]">
+            <div className="text-[var(--ink)] font-medium text-[13px] leading-tight truncate">
+              {row.original.title || '—'}
             </div>
-            <div className="text-[10.5px] text-[var(--ink-faint)] font-mono mt-0.5">
-              house #{row.original.house_id}
+            <div className="text-[10.5px] text-[var(--ink-faint)] font-mono tabular-nums mt-0.5">
+              id #{row.original.external_id}
             </div>
           </div>
         ),
@@ -105,6 +111,18 @@ export default function HiddenPage() {
         ),
       },
       {
+        id: 'price_per_m2',
+        header: '₽/м²',
+        accessorKey: 'price_per_m2',
+        cell: ({ row }: any) => (
+          <div className="text-right">
+            <span className="font-mono tabular-nums text-[var(--ink-soft)] text-[12.5px]">
+              {row.original.price_per_m2 ? fmt(Math.round(row.original.price_per_m2)) : '—'}
+            </span>
+          </div>
+        ),
+      },
+      {
         id: 'sold_date',
         header: 'снято',
         accessorKey: 'sold_date',
@@ -115,14 +133,30 @@ export default function HiddenPage() {
         ),
       },
       {
-        id: 'source',
-        header: 'источник',
-        accessorKey: 'source',
+        id: 'days_in_exposition',
+        header: 'дней',
+        accessorKey: 'days_in_exposition',
         cell: ({ row }: any) => (
-          <span className="inline-flex items-center px-1.5 h-5 text-[10px] font-mono uppercase tracking-[0.10em] font-semibold border border-[var(--ink)] bg-[var(--paper-card)] text-[var(--ink)] rounded-[1px]">
-            ЦИАН
+          <span className="font-mono tabular-nums text-[12.5px] text-[var(--ink-soft)] text-right block w-full">
+            {row.original.days_in_exposition ?? '—'}
           </span>
         ),
+      },
+      {
+        id: 'renovation',
+        header: 'ремонт',
+        accessorKey: 'renovation',
+        meta: {
+          editable: {
+            type: 'select',
+            options: [
+              { value: 'Без ремонта', label: 'Без ремонта' },
+              { value: 'Косметический', label: 'Косметический' },
+              { value: 'Евроремонт', label: 'Евроремонт' },
+              { value: 'Дизайнерский', label: 'Дизайнерский' },
+            ],
+          },
+        },
       },
       {
         id: 'url',
@@ -147,16 +181,15 @@ export default function HiddenPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="page-title">Скрытые с фото</h1>
-        <p className="page-sub">Снятые публикации с фотографиями</p>
+        <h1 className="page-title">Снятые объявления</h1>
+        <p className="page-sub">Недавние сделки с полным offerData</p>
       </div>
       <DataTable
-        name="hidden"
+        name="sold"
         columns={columns as any}
         filters={FILTERS}
         initialSort={[{ id: 'sold_date', desc: true }]}
-        totalLabel="скрытых"
-        pageSize={50}
+        totalLabel="сделок"
         rowHref={(row) => row.url || null}
       />
     </div>

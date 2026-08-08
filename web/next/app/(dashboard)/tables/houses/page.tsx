@@ -1,7 +1,6 @@
 'use client';
 
 import { useMemo } from 'react';
-import { Layers } from 'lucide-react';
 import DataTable from '@/components/admin/DataTable';
 import type { FilterDef } from '@/components/admin/FilterPanel';
 
@@ -45,10 +44,14 @@ export default function HousesPage() {
         id: 'address',
         header: 'Адрес',
         accessorKey: 'address',
+        meta: { editable: { type: 'text' } },
         cell: ({ row }: any) => (
-          <div className="min-w-[280px]">
+          <div className="min-w-[280px] py-1">
             <div className="text-[var(--ink)] font-medium text-[13px] leading-tight truncate">
               {row.original.address || '—'}
+            </div>
+            <div className="text-[11px] text-[var(--ink-mute)] font-mono mt-0.5 truncate">
+              {[row.original.street, row.original.house_num].filter(Boolean).join(', ') || '—'}
             </div>
           </div>
         ),
@@ -78,30 +81,35 @@ export default function HousesPage() {
         id: 'year',
         header: 'год',
         accessorKey: 'year',
-        cell: ({ row }: any) => (
-          <span className="font-mono tabular-nums text-[var(--ink-soft)] text-right block w-full">
-            {row.original.year ?? '—'}
-          </span>
-        ),
+        meta: { editable: { type: 'integer' }, align: 'right' },
       },
       {
         id: 'type',
         header: 'тип',
         accessorKey: 'type',
-        cell: ({ row }: any) => (
-          <span className="text-[12px] text-[var(--ink-mute)]">{row.original.type || '—'}</span>
-        ),
+        meta: {
+          editable: {
+            type: 'select',
+            options: [
+              { value: 'панель', label: 'панель' },
+              { value: 'кирпич', label: 'кирпич' },
+              { value: 'монолит', label: 'монолит' },
+              { value: 'блочный', label: 'блочный' },
+            ],
+          },
+        },
+      },
+      {
+        id: 'series',
+        header: 'серия',
+        accessorKey: 'series',
+        meta: { editable: { type: 'text' } },
       },
       {
         id: 'levels',
         header: 'этажей',
         accessorKey: 'levels',
-        cell: ({ row }: any) => (
-          <div className="text-right flex items-center justify-end gap-1 text-[var(--ink-soft)] font-mono tabular-nums text-[12.5px]">
-            <Layers size={10} strokeWidth={1.75} className="text-[var(--ink-faint)]" />
-            {row.original.levels ?? '—'}
-          </div>
-        ),
+        meta: { editable: { type: 'integer' }, align: 'right' },
       },
       {
         id: 'active_count',
@@ -143,7 +151,6 @@ export default function HousesPage() {
         filters={FILTERS}
         initialSort={[{ id: 'active_count', desc: true }]}
         totalLabel="домов"
-        pageSize={50}
       />
     </div>
   );

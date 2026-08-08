@@ -97,17 +97,16 @@ export default function ActivePage() {
   const columns = useMemo(
     () => [
       {
-        id: 'address',
+        id: 'title',
         header: 'Адрес / район',
-        accessorKey: 'district',
+        accessorKey: 'title',
         cell: ({ row }: any) => (
-          <div className="min-w-[220px]">
+          <div className="min-w-[220px] py-1">
             <div className="text-[var(--ink)] font-medium text-[13px] leading-tight truncate">
               {row.original.title || '—'}
             </div>
             <div className="text-[11px] text-[var(--ink-mute)] font-mono mt-0.5 truncate">
-              {row.original.district || '—'}
-              {row.original.okrug ? <span className="text-[var(--ink-faint)]"> · {row.original.okrug}</span> : null}
+              {row.original.external_id ? `id #${row.original.external_id}` : '—'}
             </div>
           </div>
         ),
@@ -191,9 +190,41 @@ export default function ActivePage() {
         id: 'renovation',
         header: 'ремонт',
         accessorKey: 'renovation',
-        cell: ({ row }: any) => (
-          <span className="text-[12px] text-[var(--ink-mute)]">{row.original.renovation || '—'}</span>
-        ),
+        meta: {
+          editable: {
+            type: 'select',
+            options: [
+              { value: 'Без ремонта', label: 'Без ремонта' },
+              { value: 'Косметический', label: 'Косметический' },
+              { value: 'Евроремонт', label: 'Евроремонт' },
+              { value: 'Дизайнерский', label: 'Дизайнерский' },
+            ],
+          },
+        },
+      },
+      {
+        id: 'district',
+        header: 'район',
+        accessorKey: 'district',
+        meta: { editable: { type: 'text' } },
+      },
+      {
+        id: 'metro_station',
+        header: 'метро',
+        accessorKey: 'metro_station',
+        meta: { editable: { type: 'text' } },
+      },
+      {
+        id: 'metro_walk_time',
+        header: 'мин.',
+        accessorKey: 'metro_walk_time',
+        meta: { editable: { type: 'integer' }, align: 'right' },
+      },
+      {
+        id: 'filter_id',
+        header: 'фильтр',
+        accessorKey: 'filter_id',
+        meta: { editable: { type: 'integer' }, align: 'right' },
       },
       {
         id: 'source',
@@ -248,7 +279,6 @@ export default function ActivePage() {
         filters={FILTERS}
         initialSort={[{ id: 'price_per_m2', desc: false }]}
         totalLabel="объявлений"
-        pageSize={50}
         rowHref={(row) => row.url || null}
       />
     </div>

@@ -3,8 +3,8 @@
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Bell, ChevronRight } from 'lucide-react';
-import { Navbar, NavbarContent, NavbarItem, Button } from '@heroui/react';
+import { ChevronRight } from 'lucide-react';
+import { Navbar, NavbarContent, NavbarItem } from '@heroui/react';
 import { fetchStats, type Stats } from '@/lib/api';
 
 const ROUTE_LABELS: Record<string, string> = {
@@ -66,8 +66,8 @@ export default function TopBar() {
       maxWidth="full"
       isBordered
       classNames={{
-        base: '!h-12 !bg-[var(--paper-card)] !border-b !border-[var(--rule)]',
-        wrapper: '!h-12 !px-5 !gap-4',
+        base: '!h-11 !bg-[var(--paper-card)] !border-b !border-[var(--rule)]',
+        wrapper: '!h-11 !px-5 !gap-4',
       }}
     >
       <NavbarContent justify="start" className="!gap-1.5 !flex-grow-0">
@@ -86,7 +86,9 @@ export default function TopBar() {
                     {c.label}
                   </Link>
                 )}
-                {!isLast && <ChevronRight size={13} className="text-[var(--ink-faint)]" strokeWidth={2} />}
+                {!isLast && (
+                  <ChevronRight size={13} className="text-[var(--ink-faint)]" strokeWidth={2} />
+                )}
               </div>
             </NavbarItem>
           );
@@ -94,47 +96,32 @@ export default function TopBar() {
       </NavbarContent>
 
       <NavbarContent justify="end" className="!gap-3 !flex-grow-0">
-        {stats && (
+        {stats ? (
           <NavbarItem className="!flex-grow-0">
-            <div className="flex items-center gap-3 text-[12px]">
+            <div className="flex items-center gap-2.5 text-[12px]">
               <span className="flex items-center gap-1.5">
                 <span className="text-[var(--ink-mute)]">Активных</span>
-                <span className="text-[var(--ink)] font-semibold tabular-nums">{fmt(stats.active_total)}</span>
+                <span className="text-[var(--ink)] font-semibold tabular-nums">
+                  {fmt(stats.active_total)}
+                </span>
               </span>
               <span className="w-px h-3 bg-[var(--rule)]" />
               <span className="flex items-center gap-1.5">
                 <span className="text-[var(--ink-mute)]">Снято</span>
-                <span className="text-[var(--ink-soft)] font-semibold tabular-nums">{fmt(stats.deactivated_total)}</span>
+                <span className="text-[var(--ink-soft)] font-semibold tabular-nums">
+                  {fmt(stats.deactivated_total)}
+                </span>
               </span>
               <span className="w-px h-3 bg-[var(--rule)]" />
               <span className="flex items-center gap-1.5">
                 <span className="text-[var(--ink-mute)]">Домов</span>
-                <span className="text-[var(--ink)] font-semibold tabular-nums">{fmt(stats.houses)}</span>
+                <span className="text-[var(--ink)] font-semibold tabular-nums">
+                  {fmt(stats.houses)}
+                </span>
               </span>
             </div>
           </NavbarItem>
-        )}
-
-        <NavbarItem className="!flex-grow-0">
-          <Button
-            isIconOnly
-            size="sm"
-            variant="light"
-            aria-label="Уведомления"
-            className="!w-8 !h-8 !min-w-8 !text-[var(--ink-mute)] data-[hover=true]:!text-[var(--ink)] data-[hover=true]:!bg-[var(--paper-2)]"
-          >
-            <Bell size={15} strokeWidth={2} />
-          </Button>
-        </NavbarItem>
-
-        <NavbarItem className="!flex-grow-0">
-          <div className="flex items-center gap-2 pl-1 pr-2.5 h-8 rounded-md hover:bg-[var(--paper-2)] transition-colors cursor-pointer">
-            <div className="w-6 h-6 rounded-full bg-[var(--accent)] text-white font-medium text-[11px] flex items-center justify-center">
-              Н
-            </div>
-            <span className="text-[12.5px] text-[var(--ink-soft)]">Нис</span>
-          </div>
-        </NavbarItem>
+        ) : null}
       </NavbarContent>
     </Navbar>
   );
