@@ -9,7 +9,7 @@
 
 | Инструмент | Версия | Зачем | Где взять |
 |---|---|---|---|
-| Docker Desktop | latest | Все инфра-сервисы (PG, redis, cookie, firecrawl) | https://www.docker.com/products/docker-desktop/ |
+| Docker Desktop | latest | Все инфра-сервисы (PG, redis, cookie, **flippercrawl**) | https://www.docker.com/products/docker-desktop/ |
 | Python | 3.11+ | API/парсеры/тесты локально | https://www.python.org/downloads/ |
 | Node.js | 18+ | Next.js фронтенд | https://nodejs.org/ |
 | PostgreSQL client (опц.) | 16+ | `psql` для ad-hoc запросов к БД | https://www.postgresql.org/download/ |
@@ -34,7 +34,9 @@ node --version            # v18+
 DATABASE_URL=postgresql+asyncpg://flipper:flipper_secret@app_postgres:5432/flipper
 POSTGRES_PASSWORD=flipper_secret
 
-# Firecrawl (self-hosted, отдельный docker-compose)
+# Flippercrawl — наш кастомный парсер cian, **НЕ firecrawl AI extract**.
+# Отдельный docker-compose: ../flippercrawl/ на :3002.
+# Только static-путь (data.json.rawOfferData). LLM/AI fallback НЕ используем.
 FIRECRAWL_API_KEY=local
 FIRECRAWL_BASE_URL=http://flippercrawl-api-1:3002
 
@@ -69,7 +71,7 @@ NEXT_PUBLIC_API_BASE=http://localhost:8001
 | Порт | Сервис | Проект | Доступ |
 |---|---|---|---|
 | **3000** | Next.js dev | flipper (натив) | http://localhost:3000 |
-| **3002** | Firecrawl API | flippercrawl (Docker) | http://localhost:3002 |
+| **3002** | **Flippercrawl** (НЕ firecrawl) | flippercrawl (Docker) | http://localhost:3002 |
 | **5432** | PostgreSQL | flipper (Docker `app_postgres`) | localhost:5432 |
 | **6379** | Redis | flipper (Docker `app_redis`) | localhost:6379 |
 | **8000** | Cookie Manager | flipper (Docker) | http://localhost:8000 |
@@ -110,9 +112,14 @@ docker compose ps
 #   cookie_manager     running (healthy)   # start_period 180s — подождать
 ```
 
-### 3.3. Поднять Firecrawl (отдельный docker-compose)
+### 3.3. Поднять Flippercrawl (отдельный docker-compose)
 
-Firecrawl живёт в `../flippercrawl/` — отдельный compose, общая сеть `firecrawl_backend`.
+> **ВАЖНО:** у нас **только Flippercrawl** (наш кастомный парсер), **НЕ firecrawl AI extract**.
+> Flippercrawl использует исключительно static-путь (`data.json.rawOfferData`),
+> LLM/AI fallback не подключён. Любые упоминания "firecrawl" в коде — это имя сервиса
+> и переменных окружения, а не "firecrawl AI". Подробности: `docs/PLAN_CIAN_FLIPPERCRAWL_REWRITE.md`.
+
+Flippercrawl живёт в `../flippercrawl/` — отдельный compose, общая сеть `firecrawl_backend`.
 
 ```bash
 cd ../flippercrawl

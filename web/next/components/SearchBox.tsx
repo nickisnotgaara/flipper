@@ -25,6 +25,10 @@ export default function SearchBox({
   const [loading, setLoading] = useState(false);
   const [activeIdx, setActiveIdx] = useState(0);
   const reqIdRef = useRef(0);
+  // Set to true by handlePick so the post-pick setQ(it.title) doesn't
+  // trip the debounced suggest effect with a redundant request for the
+  // exact address the user just selected.
+  const justPickedRef = useRef(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -35,6 +39,12 @@ export default function SearchBox({
 
   // Race-safe suggest fetch. Driven by the debounced query.
   useEffect(() => {
+    if (justPickedRef.current) {
+      // User just selected a suggestion — we already set q to the
+      // picked title. Don't fire another suggest for the same text.
+      justPickedRef.current = false;
+      return;
+    }
     if (debouncedQ.trim().length < 2) {
       setItems([]);
       setOpen(false);
@@ -90,8 +100,12 @@ export default function SearchBox({
   }, []);
 
   const handlePick = (it: SuggestItem) => {
+    // Suppress the next debounced suggest — the q we're about to set
+    // matches an already-shown item, so re-fetching is pure waste.
+    justPickedRef.current = true;
     onPick(it);
     setQ(it.title);
+    setItems([]);
     setOpen(false);
     inputRef.current?.blur();
   };

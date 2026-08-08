@@ -906,10 +906,23 @@ async def house_detail(house_id: int):
             "raw_data": rd,
         }
 
+    def _parse_ext_id(v):
+        """external_house_id хранится либо как int-строка (flatinfo, cian_sold),
+        либо как 'ad_<int>' (cian_ad). Возвращаем int или None."""
+        if not v:
+            return None
+        s = str(v).strip()
+        if s.startswith("ad_"):
+            s = s[3:]
+        try:
+            return int(s)
+        except (ValueError, TypeError):
+            return None
+
     return {
         "house": {
             "id": house.id,
-            "house_id": int(house.external_house_id) if house.external_house_id else None,
+            "house_id": _parse_ext_id(house.external_house_id),
             "source": house.source,
             "cian_house_id": house.cian_house_id,
             "address": house.address,
