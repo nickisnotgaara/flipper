@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   grist:
-    image: gristlabs/grist:1.7.5
+    image: gristlabs/grist:1.7.17
     container_name: flipper_grist
     restart: unless-stopped
     env_file: ./grist.env

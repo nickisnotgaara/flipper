@@ -29,14 +29,16 @@ const TABS = [
     label: 'Данные парсинга',
     icon: Activity,
     docId: process.env.NEXT_PUBLIC_GRIST_DOC_PARSING ?? 'mDaHoGD6yahtxaqugwr5mK',
-    badge: '7 таблиц',
+    // tableId: 'Table1' (Продано, 2,000 строк) — создана первой, открывается по умолчанию
+    badge: '2 000 строк',
   },
   {
     key: 'archives',
     label: 'База архивов',
     icon: Archive,
     docId: process.env.NEXT_PUBLIC_GRIST_DOC_ARCHIVES ?? 'kaBfATwGgUYjDa8doqMzk3',
-    badge: '6 таблиц',
+    // CianSold — создана первой (откроется по умолчанию; HousesAll — вторая, уже с 20K строк)
+    badge: '20 000 строк',
   },
 ] as const;
 
@@ -47,6 +49,7 @@ export default function AnalyticsPage() {
   const [reloadKey, setReloadKey] = useState(0);
 
   const current = TABS.find((t) => t.key === active) ?? TABS[0];
+  // Открываем первую таблицу документа (по умолчанию — Table1, самая заполненная)
   const fullUrl = `${GRIST_BASE}/${current.docId}/p/1?style=singlePage&themeAppearance=light&embed=true&_=${reloadKey}`;
   const openUrl = `${GRIST_BASE}/${current.docId}`;
 

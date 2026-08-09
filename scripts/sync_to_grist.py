@@ -188,8 +188,8 @@ def sync_parsing(tables):
         return None
 
     if (do_all or "Продано" in tables):
-        # Продано = Table4 (создана последней с этим именем)
-        for cand in ["Table4", "Продано"]:
+        # Продано — Table1 (первая созданная) или имя «Продано»
+        for cand in ["Table1", "Продано"]:
             if cand in n2i:
                 tid = n2i[cand]
                 break
