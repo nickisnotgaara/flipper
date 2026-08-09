@@ -32,7 +32,7 @@ const TABS = [
     label: 'Данные парсинга',
     docId: process.env.NEXT_PUBLIC_GRIST_DOC_PARSING ?? 'mDaHoGD6yahtxaqugwr5mK',
     defaultTable: 'Table1',
-    badge: '2 000 строк',
+    badge: '5 000 строк',
     displayNames: {
       Table1: 'Продано',
       Table2: 'Аванс',

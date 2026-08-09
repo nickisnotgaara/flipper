@@ -55,31 +55,54 @@ export default function GristTable({
   );
 
   const cols = useMemo<ColumnDef<Row>[]>(() => {
-    return [
-      { id: '__id', accessorFn: (r) => r.id, header: 'id', cell: (info) => info.getValue<number>() },
-      ...columns.map<ColumnDef<Row>>((c) => ({
-        id: c.id,
-        accessorFn: (r) => r.fields[c.id],
-        header: c.label,
-        cell: (info) => {
-          const v = info.getValue();
-          if (isUrl(v)) {
-            return (
-              <a
-                href={v}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[var(--accent)] hover:underline"
-              >
-                {fmtCell(v).slice(0, 50)}
-                {v.length > 50 ? '…' : ''}
-              </a>
-            );
-          }
-          return <span className="tabular-nums">{fmtCell(v)}</span>;
-        },
-      })),
+    // Column ordering: pin the most useful ones at the front, then the
+    // rest in the order Grist returned them.
+    const PINNED = [
+      'url',
+      'external_id',
+      'source',
+      'price',
+      'price_per_m2',
+      'area',
+      'rooms',
+      'floor_current',
+      'floor_total',
+      'renovation',
+      'exposition_days',
+      'publish_date',
+      'sold_date',
+      'house_id',
+      'pg_id',
     ];
+    const pinned = PINNED.flatMap((id) => {
+      const c = columns.find((c) => c.id === id);
+      return c ? [c] : [];
+    });
+    const rest = columns.filter((c) => !PINNED.includes(c.id));
+    const ordered = [...pinned, ...rest];
+
+    return ordered.map<ColumnDef<Row>>((c) => ({
+      id: c.id,
+      accessorFn: (r) => r.fields[c.id],
+      header: c.label,
+      cell: (info) => {
+        const v = info.getValue();
+        if (isUrl(v)) {
+          return (
+            <a
+              href={v}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[var(--accent)] hover:underline"
+            >
+              {fmtCell(v).slice(0, 50)}
+              {v.length > 50 ? '…' : ''}
+            </a>
+          );
+        }
+        return <span className="tabular-nums">{fmtCell(v)}</span>;
+      },
+    }));
   }, [columns]);
 
   const table = useReactTable({

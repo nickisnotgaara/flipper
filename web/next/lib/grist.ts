@@ -66,9 +66,14 @@ export async function tableColumns(
   // approximation for table display.
   const rows = await tableRecords(docId, tableId, 1);
   if (rows.length === 0) return [];
-  return Object.entries(rows[0].fields ?? {}).map(([id, v]) => ({
-    id,
-    label: id,
-    type: typeof v === 'number' ? 'Numeric' : typeof v,
-  }));
+  // Drop Grist's reserved / internal columns that have no meaning for
+  // a user-facing table.
+  const RESERVED = new Set(['id', 'manualSort']);
+  return Object.entries(rows[0].fields ?? {})
+    .filter(([id]) => !RESERVED.has(id))
+    .map(([id, v]) => ({
+      id,
+      label: id,
+      type: typeof v === 'number' ? 'Numeric' : typeof v,
+    }));
 }
