@@ -102,6 +102,9 @@ minio-data/
 scripts/.grist_map.json
 web/next/app/_analytics_disabled/
 web/next/app/_analytics_disabled.disabled
+web/next/app/_disabled_tables/
+web/next/app/_disabled_tables
+web/next/components/admin/_FlipperWorkbook_disabled.tsx
 web/next/.next-stdout.log
 web/next/.next-stderr.log
 
