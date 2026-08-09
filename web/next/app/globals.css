@@ -326,6 +326,10 @@ table, .tabular-nums {
  * strip, and any Univer sidebar (e.g. cell-format panel) is dead UI
  * for us. Hiding the elements via CSS keeps Univer's reactive workbench
  * happy while removing the visual noise.
+ *
+ * Workbench layout override: Univer's grid template reserves columns
+ * for the (hidden) sidebars, which leaves a dead zone on the right of
+ * the spreadsheet. Force the workbench to a single full-width column.
  */
 .univer-sidebar,
 .univer-workbench-layout-sidebar,
@@ -334,7 +338,31 @@ table, .tabular-nums {
 header[role="banner"] {
   display: none !important;
 }
-/* Hide the Univer container scrollbar that conflicts with our scroll. */
+/* Workbench root: collapse to a single column so the data area fills
+ * the entire container. We also disable the grid template that would
+ * otherwise reserve space for the (hidden) left/right side panels. */
+.univer-container {
+  width: 100% !important;
+  height: 100% !important;
+}
+.univer-container .univer-workbench-layout,
+.univer-container [class*="univer-workbench"] {
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+.univer-container [class*="univer-grid-cols"] {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+.univer-container [class*="univer-grid-rows"] {
+  grid-template-rows: auto minmax(0, 1fr) auto !important;
+}
+/* Header / footer / formula bar — they're disabled in the preset, but
+ * make sure the data canvas still claims the remaining vertical space. */
+.univer-container canvas {
+  max-width: 100% !important;
+}
 .univer-container ::-webkit-scrollbar { width: 8px; height: 8px; }
 .univer-container ::-webkit-scrollbar-thumb { background: var(--rule); }
 

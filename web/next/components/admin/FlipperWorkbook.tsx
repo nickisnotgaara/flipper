@@ -21,7 +21,7 @@
  * chrome text (File/Edit/Insert/Format/Data) shows in Russian.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import {
   createUniver,
@@ -139,11 +139,34 @@ async function patchCell(
 // Univer's `IObjectMatrixPrimitiveType<ICellData>` is `{ [row: number]:
 // { [col: number]: ICellData } }`. ICellData.v is Nullable<CellValue> which
 // is `string | number | boolean | null | undefined` (not `unknown`).
+
+// `columnData` per-column metadata — drives the actual column widths
+// from the server-side `_TABLE_COLUMNS` definitions so the spreadsheet
+// matches the rest of the admin panel (id narrow, URL wide, etc.).
+// Univer uses `w` for width (IColumnData) and `hd` for hidden.
+function buildColumnData(
+  columns: ColumnMeta[],
+): Record<number, { w: number; hd?: 0 | 1 }> {
+  const out: Record<number, { w: number; hd?: 0 | 1 }> = {};
+  for (let c = 0; c < columns.length; c++) {
+    out[c] = { w: columns[c].width };
+  }
+  return out;
+}
+
 function rowsToCellData(
   rows: Array<Record<string, unknown>>,
   columns: ColumnMeta[],
 ): IObjectMatrixPrimitiveType<ICellData> {
   const cellData: IObjectMatrixPrimitiveType<ICellData> = {};
+  // Row 0 = header row (column labels). Data rows start at index 1.
+  // The worksheet is created with `freeze: { ySplit: 1 }` so the header
+  // row stays visible while the user scrolls through the data.
+  const headerRow: { [col: number]: ICellData } = {};
+  for (let c = 0; c < columns.length; c++) {
+    headerRow[c] = { v: columns[c].label, t: 4 /* force-string */ };
+  }
+  cellData[0] = headerRow;
   for (let r = 0; r < rows.length; r++) {
     const row = rows[r];
     const rowMap: { [col: number]: ICellData } = {};
@@ -151,7 +174,13 @@ function rowsToCellData(
       const col = columns[c];
       const raw = row[col.key];
       if (raw === null || raw === undefined) continue;
-      // Univer uses `t` for type: 1=string, 2=number, 3=boolean, 4=force-string
+      // Univer cell types:
+      //   1 = string (auto-detect — Univer will try to interpret as formula
+      //                or hyperlink; for URLs this fires the
+      //                `sheets-ui.info.error` tooltip)
+      //   2 = number
+      //   3 = boolean
+      //   4 = force-string (no auto-detection; safe for URLs and free text)
       let t: number | undefined;
       let v: CellValue;
       if (col.type === 'number') {
@@ -159,15 +188,19 @@ function rowsToCellData(
         v = Number(raw) as CellValue;
       } else if (col.type === 'url') {
         // We keep URL as plain text; opening via click can be added later.
-        t = 1;
+        // `t: 4` skips Univer's auto-hyperlink detection that otherwise
+        // renders a broken-link badge + "sheets-ui.info.error" tooltip.
+        t = 4;
         v = String(raw);
       } else {
-        t = 1;
+        // Plain text columns — also force-string so dates and numeric-looking
+        // strings (e.g. `1-к квартира 38.3 м²`) are not re-interpreted.
+        t = 4;
         v = String(raw);
       }
       rowMap[c] = { v, t };
     }
-    cellData[r] = rowMap;
+    cellData[r + 1] = rowMap;
   }
   return cellData;
 }
@@ -183,6 +216,11 @@ export default function FlipperWorkbook() {
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [ready, setReady] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  // Per-tab data cache so sort can re-render without re-fetching.
+  const dataCacheRef = useRef<Record<string, { rows: Array<Record<string, unknown>>; columns: ColumnMeta[] }>>({});
+  // Sort state: per-tab, by column key + direction. `null` = no sort.
+  const [sortBy, setSortBy] = useState<{ column: string; dir: 'asc' | 'desc' } | null>(null);
+  const [sortOpen, setSortOpen] = useState(false);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const univerRef = useRef<Univer | null>(null);
@@ -318,9 +356,27 @@ export default function FlipperWorkbook() {
   // just call setActiveSheet() if the data is already in memory.
   useEffect(() => {
     if (!ready) return;
+    // Switching tabs resets the sort — each tab has its own data and
+    // remembering the previous sort key would be confusing.
+    setSortBy(null);
     void loadTab(tab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, tab]);
+
+  // Close the sort dropdown on outside click. The button uses
+  // `data-sort-trigger` and the menu uses `role="menu"` so a single
+  // delegated listener handles both.
+  useEffect(() => {
+    if (!sortOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (!t) return;
+      if (t.closest('[data-sort-trigger]') || t.closest('[role="menu"]')) return;
+      setSortOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [sortOpen]);
 
   async function loadTab(tabId: TabId) {
     const univerAPI = univerAPIRef.current;
@@ -332,11 +388,16 @@ export default function FlipperWorkbook() {
       try {
         setStatusMsg(`Загружаю ${TABS.find((t) => t.id === tabId)?.label}…`);
         const data = await fetchTab(tabId);
+        // Cache the rows so the sort handler can re-render without a
+        // server round-trip. We keep one snapshot per tab.
+        dataCacheRef.current[tabId] = { rows: data.rows, columns: data.columns };
         const cellData = rowsToCellData(data.rows, data.columns);
         const columnCount = data.columns.length;
         const rowCount = data.rows.length;
 
-        // Cache the columns for the edit hook.
+        // Cache the columns for the edit hook. The PK-by-row map is keyed
+        // by DATA row index (0-based, excluding the header), matching
+        // the row position in `cellData` (which has the header at index 0).
         sheetMetaRef.current[sheetId] = {
           columns: data.columns,
           pkByRow: new Map(
@@ -365,14 +426,14 @@ export default function FlipperWorkbook() {
                 zoomRatio: 1,
                 scrollTop: 0,
                 scrollLeft: 0,
-                defaultColumnWidth: 120,
-                defaultRowHeight: 24,
+                defaultColumnWidth: 88,
+                defaultRowHeight: 22,
                 mergeData: [],
                 cellData,
                 rowData: {},
-                columnData: {},
-                rowHeader: { width: 50, hidden: 0 },
-                columnHeader: { height: 24, hidden: 0 },
+                columnData: buildColumnData(data.columns),
+                rowHeader: { width: 46, hidden: 0 },
+                columnHeader: { height: 26, hidden: 0 },
                 showGridlines: 1,
                 rightToLeft: 0,
               },
@@ -391,6 +452,12 @@ export default function FlipperWorkbook() {
             {
               sheet: {
                 cellData,
+                columnData: buildColumnData(data.columns),
+                defaultColumnWidth: 88,
+                defaultRowHeight: 22,
+                rowHeader: { width: 46, hidden: 0 },
+                columnHeader: { height: 26, hidden: 0 },
+                freeze: { xSplit: 0, ySplit: 1, startColumn: 0, startRow: 1 },
               },
             },
           );
@@ -439,6 +506,97 @@ export default function FlipperWorkbook() {
     }
   }
 
+  // ---- Sort ----------------------------------------------------------------
+  // Google-Sheets-style sort: pick a column and ASC / DESC, the data re-renders
+  // in place. We sort on the client (rows are already cached per tab) and call
+  // FRange.setValues() to write the new order back into Univer — no server
+  // round-trip, the current tab is the only thing that needs re-rendering.
+  const applySort = useCallback(
+    (col: ColumnMeta | null, dir: 'asc' | 'desc' | null) => {
+      const wb = workbookRef.current;
+      if (!wb) return;
+      const sheetId = TAB_TO_SHEET_ID[tab];
+      const ws = wb.getSheetBySheetId(sheetId);
+      if (!ws) return;
+      const cached = dataCacheRef.current[tab];
+      if (!cached) return;
+      const { rows, columns } = cached;
+      if (rows.length === 0) return;
+
+      // Build a sorted copy of the rows. We never mutate the cached array.
+      const sorted = rows.slice();
+      if (col && dir) {
+        const k = col.key;
+        const numeric = col.type === 'number';
+        const collator = new Intl.Collator('ru', { numeric: true, sensitivity: 'base' });
+        sorted.sort((a, b) => {
+          const av = a[k];
+          const bv = b[k];
+          if (av == null && bv == null) return 0;
+          if (av == null) return 1;
+          if (bv == null) return -1;
+          let cmp: number;
+          if (numeric) {
+            cmp = Number(av) - Number(bv);
+          } else {
+            cmp = collator.compare(String(av), String(bv));
+          }
+          return dir === 'asc' ? cmp : -cmp;
+        });
+      }
+
+      // Re-build the cell matrix from the sorted rows and write it back.
+      // The header row (index 0) is left untouched; only data rows 1..N
+      // are re-rendered.
+      const matrix: Array<Array<CellValue | ICellData>> = [];
+      for (let r = 0; r < sorted.length; r++) {
+        const row = sorted[r];
+        const rowMap: Array<CellValue | ICellData> = [];
+        for (let c = 0; c < columns.length; c++) {
+          const colMeta = columns[c];
+          const raw = row[colMeta.key];
+          if (raw === null || raw === undefined) {
+            rowMap.push(null);
+            continue;
+          }
+          if (colMeta.type === 'number') rowMap.push({ v: Number(raw) as CellValue, t: 2 });
+          else rowMap.push({ v: String(raw), t: 4 });
+        }
+        matrix.push(rowMap);
+      }
+      try {
+        // Row 1 is the first data row (row 0 is the header).
+        const range = (ws as any).getRange(1, 0, sorted.length, columns.length);
+        if (range && typeof range.setValues === 'function') {
+          range.setValues(matrix);
+        }
+      } catch (e) {
+        console.error('setValues after sort failed', e);
+      }
+    },
+    [tab],
+  );
+
+  const setSortColumn = useCallback(
+    (key: string) => {
+      const cached = dataCacheRef.current[tab];
+      if (!cached) return;
+      const col = cached.columns.find((c) => c.key === key) ?? null;
+      const dir: 'asc' | 'desc' =
+        sortBy && sortBy.column === key ? (sortBy.dir === 'asc' ? 'desc' : 'asc') : 'asc';
+      setSortBy(col ? { column: key, dir } : null);
+      applySort(col, dir);
+      setSortOpen(false);
+    },
+    [tab, sortBy, applySort],
+  );
+
+  const clearSort = useCallback(() => {
+    setSortBy(null);
+    applySort(null, null);
+    setSortOpen(false);
+  }, [applySort]);
+
   // Total across all tabs (used in the formula bar).
   const totalAll = useMemo(
     () => Object.values(counts).reduce((s, n) => s + (n || 0), 0),
@@ -446,11 +604,22 @@ export default function FlipperWorkbook() {
   );
   const currentLabel = TABS.find((t) => t.id === tab)?.label ?? '';
 
+  // Current tab's columns (used to build the sort dropdown). The data
+  // cache may not exist yet on first mount — we just show nothing.
+  const cachedCols = dataCacheRef.current[tab]?.columns ?? [];
+  const sortCol = sortBy
+    ? cachedCols.find((c) => c.key === sortBy.column) ?? null
+    : null;
+  const sortLabel = sortBy
+    ? `${sortCol?.label ?? sortBy.column} ${sortBy.dir === 'asc' ? '↑' : '↓'}`
+    : 'Сортировка';
+
   return (
     <div className="h-screen w-screen flex flex-col bg-[var(--paper-2)] overflow-hidden">
       {/* ===== Top bar =====================================================
           Slim. Back link to map (the only other primary view) + active tab
-          name + total + a transient status message slot for save feedback. */}
+          name + total + a transient status message slot for save feedback
+          + a sort dropdown that re-renders the current sheet client-side. */}
       <div className="flex items-center gap-3 px-4 h-9 bg-[var(--paper-card)] border-b border-[var(--rule)] shrink-0 text-[12.5px]">
         <a
           href="/map"
@@ -464,6 +633,65 @@ export default function FlipperWorkbook() {
         {statusMsg && (
           <span className="text-[var(--ink-mute)] font-mono">{statusMsg}</span>
         )}
+
+        {/* Sort dropdown — Google-Sheets style: pick a column, click again
+            to flip ASC/DESC. The popover is plain React (no external lib). */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setSortOpen((o) => !o)}
+            className="flex items-center gap-1.5 rounded border border-[var(--rule)] bg-[var(--paper-2)] px-2 h-7 text-[var(--ink-soft)] hover:bg-[var(--paper-soft)] hover:text-[var(--ink)]"
+            aria-haspopup="menu"
+            aria-expanded={sortOpen}
+            data-sort-trigger=""
+          >
+            <span className="text-[var(--ink-faint)]">↕</span>
+            <span>{sortLabel}</span>
+          </button>
+          {sortOpen && (
+            <div
+              role="menu"
+              className="absolute right-0 top-8 z-50 w-64 max-h-96 overflow-y-auto rounded-md border border-[var(--rule)] bg-[var(--paper-card)] py-1 text-[12.5px] shadow-lg"
+            >
+              {sortBy && (
+                <button
+                  type="button"
+                  onClick={clearSort}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[var(--ink-mute)] hover:bg-[var(--paper-soft)] hover:text-[var(--ink)]"
+                >
+                  <span className="text-[var(--ink-faint)]">⊘</span>
+                  <span>Без сортировки</span>
+                </button>
+              )}
+              {sortBy && <div className="my-1 h-px bg-[var(--rule-soft)]" />}
+              {cachedCols.map((c) => {
+                const active = sortBy?.column === c.key;
+                return (
+                  <button
+                    key={c.key}
+                    type="button"
+                    onClick={() => setSortColumn(c.key)}
+                    className={
+                      'flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors ' +
+                      (active
+                        ? 'bg-[var(--accent-soft)] text-[var(--accent-ink)]'
+                        : 'text-[var(--ink)] hover:bg-[var(--paper-soft)]')
+                    }
+                  >
+                    <span className="w-3 text-[var(--ink-faint)]">
+                      {active ? (sortBy?.dir === 'asc' ? '↑' : '↓') : ''}
+                    </span>
+                    <span className="flex-1">{c.label}</span>
+                    <span className="font-mono text-[10.5px] text-[var(--ink-faint)]">
+                      {c.type === 'number' ? '123' : 'АЯ'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
         <span className="text-[var(--ink-faint)] font-mono tabular-nums">
           {totalAll.toLocaleString('ru-RU')} строк
         </span>
