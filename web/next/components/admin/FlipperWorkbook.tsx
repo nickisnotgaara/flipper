@@ -217,9 +217,15 @@ export default function FlipperWorkbook() {
       presets: [
         UniverSheetsCorePreset({
           container: containerRef.current,
-          // Hide Univer's built-in bottom tab bar — we render our own.
-          // (Univer's footer option takes a boolean; see preset-sheets-core.)
-          footer: false,
+          // Strip the heavy Office-style chrome — we render our own top bar
+          // and our own bottom tab strip. What stays is the data grid +
+          // column/row headers + a slim formula bar (A1 ref + value) — the
+          // bare minimum that still reads as a spreadsheet.
+          header: false,        // Hide the "Начало / Формулы / Данные" ribbon.
+          toolbar: false,       // Hide the B/I/U/alignment toolbar.
+          contextMenu: false,   // Hide right-click context menu.
+          footer: false,        // Hide Univer's built-in bottom sheet bar.
+          formulaBar: true,     // Keep A1 cell ref + value display.
         }),
       ],
     });
@@ -423,42 +429,38 @@ export default function FlipperWorkbook() {
 
   return (
     <div className="h-screen w-screen flex flex-col bg-[var(--paper-2)] overflow-hidden">
-      {/* ===== Formula bar / workbook header ======================== */}
-      <div className="flex items-center gap-3 px-4 h-10 bg-[var(--paper-card)] border-b border-[var(--rule)] shrink-0">
+      {/* ===== Top bar =====================================================
+          Slim. Back link to map (the only other primary view) + active tab
+          name + total + a transient status message slot for save feedback. */}
+      <div className="flex items-center gap-3 px-4 h-9 bg-[var(--paper-card)] border-b border-[var(--rule)] shrink-0 text-[12.5px]">
         <a
-          href="/dashboard"
-          className="text-[12.5px] text-[var(--ink-mute)] hover:text-[var(--ink)] transition-colors"
+          href="/map"
+          className="text-[var(--ink-mute)] hover:text-[var(--ink)] transition-colors"
         >
-          ← В панель
+          ← Карта
         </a>
-        <span className="text-[12px] text-[var(--ink-faint)]">/</span>
-        <span className="text-[13px] text-[var(--ink)] font-medium">Таблицы</span>
-        <span className="text-[12px] text-[var(--ink-faint)]">/</span>
-        <span className="text-[13px] text-[var(--ink-soft)]">{currentLabel}</span>
-
+        <span className="text-[var(--ink-faint)]">·</span>
+        <span className="text-[var(--ink-soft)] font-medium">{currentLabel}</span>
         <div className="flex-1" />
-
         {statusMsg && (
-          <span className="text-[11.5px] text-[var(--ink-mute)] font-mono">
-            {statusMsg}
-          </span>
+          <span className="text-[var(--ink-mute)] font-mono">{statusMsg}</span>
         )}
-        <span className="text-[11.5px] text-[var(--ink-faint)] font-mono tabular-nums">
-          {totalAll.toLocaleString('ru-RU')} строк · {TABS.length} листов
+        <span className="text-[var(--ink-faint)] font-mono tabular-nums">
+          {totalAll.toLocaleString('ru-RU')} строк
         </span>
       </div>
 
-      {/* ===== Univer canvas ============================================
-          flex-1 takes the rest of the viewport. The footer (bottom
-          sheet-bar) is hidden via the UniverSheetsCorePreset({footer:false})
-          option above — we render our own bottom strip below. */}
+      {/* ===== Univer data grid ============================================
+          Stripped chrome (ribbon / toolbar / context menu all off in the
+          preset config above). What renders inside the container is just
+          the cell grid + column/row headers + slim formula bar. */}
       <div
         ref={containerRef}
         className="flex-1 min-h-0 w-full"
         style={{ background: 'var(--paper-card)' }}
       />
 
-      {/* ===== Bottom tab strip (our own, with URL state) ============= */}
+      {/* ===== Bottom tab strip ============================================ */}
       <div
         className="flex items-end gap-0 px-2 h-9 bg-[var(--paper-2)] border-t border-[var(--rule)] shrink-0 overflow-x-auto"
         role="tablist"
