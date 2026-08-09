@@ -1907,11 +1907,17 @@ _TABLE_COLUMNS = {
     ],
 }
 
-# Three derived tabs are direct configs of active_ads with a different
-# `source_filter` so the SQL layer doesn't need a special pre-baked query path.
-# "filters"   → all active ads (parser URL view, all sources)
-# "avans"     → active ads from the "avans" source (filter_id=6)
-# "offers"    → active ads from the "offers" source (filter_id 1–4)
+# Three derived tabs are direct configs of active_ads with a pre-baked
+# `filter_id` filter. After the round-1 migration every server row has
+# `source='cian_active'` and the original parser bucket lives in
+# `filter_id` (1–4 = offers, 5 = signals, 6 = avans, NULL = unsorted).
+# So /api/tables/filters returns all active rows, /avans returns the
+# filter_id=6 subset, /offers returns the filter_id ∈ {1,2,3,4} subset.
+_TABLE_DEFAULT_FILTER_IDS: dict[str, tuple[int, ...]] = {
+    "avans":  (6,),
+    "offers": (1, 2, 3, 4),
+    # "filters" intentionally has no default — it's the full parser view.
+}
 _TABLE_CONFIGS = {
     "active": {
         "table": "active_ads",
@@ -1989,7 +1995,7 @@ _TABLE_CONFIGS = {
     },
     "filters": {
         "table": "active_ads",
-        "source_filter": None,  # all active sources (cian_active + avans + offers)
+        "source_filter": None,  # all active rows regardless of source/filter_id
         "select": "id, source, external_id, url, price, price_per_m2, area, rooms, "
                   "floor_current, floor_total, district, okrug, metro_station, metro_walk_time, "
                   "renovation, days_in_exposition, "
@@ -2003,7 +2009,7 @@ _TABLE_CONFIGS = {
     },
     "avans": {
         "table": "active_ads",
-        "source_filter": "source='avans'",
+        "source_filter": None,  # filter_id-driven; default is set via _TABLE_DEFAULT_FILTER_IDS
         "select": "id, source, external_id, url, price, price_per_m2, area, rooms, "
                   "floor_current, floor_total, district, okrug, metro_station, metro_walk_time, "
                   "renovation, days_in_exposition, "
@@ -2017,7 +2023,7 @@ _TABLE_CONFIGS = {
     },
     "offers": {
         "table": "active_ads",
-        "source_filter": "source='offers'",
+        "source_filter": None,  # filter_id-driven; default is set via _TABLE_DEFAULT_FILTER_IDS
         "select": "id, source, external_id, url, price, price_per_m2, area, rooms, "
                   "floor_current, floor_total, district, okrug, metro_station, metro_walk_time, "
                   "renovation, days_in_exposition, "
@@ -2065,6 +2071,14 @@ async def _fetch_table_rows(name: str, params: dict) -> dict:
     cfg = _table_query(name)
     if not cfg:
         raise HTTPException(status_code=404, detail=f"Unknown table '{name}'")
+
+    # Default filter_id for derived tabs. The caller can still override
+    # by passing `?filter_id=...` explicitly (used by the admin UI when
+    # narrowing inside an existing tab).
+    if not (params.get("filter_id") or "").strip():
+        defaults = _TABLE_DEFAULT_FILTER_IDS.get(name)
+        if defaults:
+            params = {**params, "filter_id": ",".join(str(x) for x in defaults)}
 
     page = _parse_int(params.get("page"), default=1, lo=1, hi=100_000)
     page_size = _parse_int(params.get("page_size"), default=50, lo=1, hi=500)
@@ -2154,6 +2168,23 @@ async def _fetch_table_rows(name: str, params: dict) -> dict:
                 pk = _p()
                 where_clauses.append(f"source = ANY(:{pk} ::text[])")
                 where_params[pk] = slist
+
+    # filter_id multi-select (CSV). The round-1 migration re-classified
+    # every server row to `source='cian_active'` and stores the original
+    # parser ID in `filter_id` (1–4 = offers, 5 = signals, 6 = avans, None
+    # = unsorted). So the /avans and /offers tabs in the workbook filter
+    # by filter_id, not by source.
+    if name in ("active", "sold", "hidden", "filters", "avans", "offers"):
+        filter_ids = (params.get("filter_id") or "").strip()
+        if filter_ids:
+            try:
+                flist = [int(x) for x in filter_ids.split(",") if x]
+                if flist:
+                    pk = _p()
+                    where_clauses.append(f"filter_id = ANY(:{pk} ::int[])")
+                    where_params[pk] = flist
+            except ValueError:
+                pass
 
     # Full-text search (case-insensitive contains) — search across configured cols.
     # We use ILIKE on a single concatenated text. Cheap at 5k rows; for 200k
