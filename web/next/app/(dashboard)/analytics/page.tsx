@@ -10,6 +10,7 @@
 import {
   GRIST_URL,
   listTables,
+  sqlRecords,
   tableColumns,
   tableRecords,
 } from '@/lib/grist';
@@ -80,6 +81,21 @@ export default async function AnalyticsPage({
 
   // Fetch available tables (for the dropdown) + the selected table's rows.
   const allTables = await listTables(current.docId).catch(() => []);
+
+  // Compute the dynamic badge: sum of row counts across all tables in
+  // this doc. One cheap SQL per table, only for the "active" tab.
+  let totalRows = 0;
+  if (allTables.length > 0) {
+    const counts = await Promise.all(
+      allTables.map((t) =>
+        sqlRecords(current.docId, `SELECT COUNT(*) AS c FROM ${t.id}`)
+          .then((rs) => rs[0]?.fields?.c ?? 0)
+          .catch(() => 0),
+      ),
+    );
+    totalRows = counts.reduce((a, b) => a + b, 0);
+  }
+  const dynamicBadge = totalRows.toLocaleString('ru-RU').replace(/,/g, ' ') + ' строк';
   // Accept either the tableId (Table1) or the display name (Продано)
   // as ?table=…, so links from outside don't need to know the tableId.
   const tableId =
@@ -147,6 +163,8 @@ export default async function AnalyticsPage({
       <div className="flex items-center gap-1 border-b border-[var(--rule)] bg-[var(--paper-card)] px-4">
         {TABS.map((t) => {
           const isActive = t.key === current.key;
+          // Live row count for the active tab; static fallback for others.
+          const badge = isActive ? dynamicBadge : t.badge;
           return (
             <Link
               key={t.key}
@@ -160,7 +178,7 @@ export default async function AnalyticsPage({
             >
               <span>{t.label}</span>
               <span className="text-[10.5px] text-[var(--ink-faint)] tabular-nums">
-                {t.badge}
+                {badge}
               </span>
             </Link>
           );

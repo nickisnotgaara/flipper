@@ -1,0 +1,231 @@
+"""
+Fill the 6 empty tables in Парсинг doc:
+  FILTERS       - 6 metadata rows (one per filter)
+  Table2 Аванс  - active_ads WHERE filter_id=6
+  Table3 Аванс_Продано - sold_ads WHERE house_id IN (avans houses)
+  Balans        - per-filter stats (active/sold/avg_price)
+  Offers_Parser - active_ads WHERE filter_id IN (1,2,3,4)
+  Signals_Parser- active_ads WHERE filter_id=5
+
+Uses:
+  psycopg2 (stdlib in this env), urllib (stdlib), basic API key auth.
+"""
+import json
+import urllib.request
+import urllib.parse
+import psycopg2
+
+GRIST_URL = 'http://localhost:8484'
+GRIST_KEY = 'flipper_prod_c173df83d342e744aa1fa74bb80bd19a32f5f598d7e582c0c8d4561659290978'
+DOC_ID = 'mDaHoGD6yahtxaqugwr5mK'  # Парсинг
+
+# Local PG
+conn = psycopg2.connect(host='127.0.0.1', port=5432, user='flipper', password='flipper_secret', dbname='flipper')
+cur = conn.cursor()
+
+# Grist helpers ------------------------------------------------------------
+def grist_sql(q):
+    req = urllib.request.Request(
+        f'{GRIST_URL}/api/docs/{DOC_ID}/sql?q=' + urllib.parse.quote(q),
+        headers={'Authorization': f'Bearer {GRIST_KEY}'},
+    )
+    with urllib.request.urlopen(req) as r:
+        return json.loads(r.read())
+
+def grist_apply(actions):
+    body = json.dumps(actions).encode()
+    req = urllib.request.Request(
+        f'{GRIST_URL}/api/docs/{DOC_ID}/apply',
+        data=body,
+        headers={'Authorization': f'Bearer {GRIST_KEY}', 'Content-Type': 'application/json'},
+        method='POST',
+    )
+    with urllib.request.urlopen(req) as r:
+        return json.loads(r.read())
+
+def grist_post_records(table, records):
+    body = json.dumps({'records': records}).encode()
+    req = urllib.request.Request(
+        f'{GRIST_URL}/api/docs/{DOC_ID}/tables/{table}/records',
+        data=body,
+        headers={'Authorization': f'Bearer {GRIST_KEY}', 'Content-Type': 'application/json'},
+        method='POST',
+    )
+    with urllib.request.urlopen(req) as r:
+        return json.loads(r.read())
+
+# Generic helper: insert a chunk of dicts into a Grist table
+def bulk_insert(table, dicts, batch=200):
+    added = 0
+    for i in range(0, len(dicts), batch):
+        chunk = []
+        for d in dicts[i:i+batch]:
+            fields = {k: v for k, v in d.items() if v is not None and k not in {'id', 'manualSort'}}
+            # Convert date/datetime to ISO
+            for k, v in list(fields.items()):
+                if hasattr(v, 'isoformat'):
+                    fields[k] = v.isoformat()
+            chunk.append({'fields': fields})
+        try:
+            r = grist_post_records(table, chunk)
+            added += len(r.get('records', []))
+        except urllib.error.HTTPError as e:
+            body = e.read().decode()
+            print(f'   FAIL @ batch {i}: {e.code} {body[:300]}')
+            for j, rec in enumerate(chunk):
+                try:
+                    grist_post_records(table, [rec])
+                    added += 1
+                except urllib.error.HTTPError as e2:
+                    body2 = e2.read().decode()
+                    print(f'      bad row #{i+j}: {body2[:200]}')
+    return added
+
+# Clear table (delete all rows)
+def clear_table(table):
+    r = grist_sql(f'SELECT id FROM {table}')
+    ids = [row['fields']['id'] for row in r['records']]
+    if not ids:
+        return 0
+    for i in range(0, len(ids), 1000):
+        chunk = ids[i:i+1000]
+        grist_apply([['BulkRemoveRecord', table, chunk]])
+    return len(ids)
+
+# Filter definitions -------------------------------------------------------
+FILTERS_DEF = [
+    (1, 'offers, max_year=2000, dists=23-132', 1, 2000, '23,24,...,132', True),
+    (2, 'offers, min_year=2000, dists=23-132', 2000, 9999, '23,24,...,132', True),
+    (3, 'offers, max_year=2000, dists=13-22', 1, 2000, '13,14,...,22', True),
+    (4, 'offers, min_year=2000, dists=13-22', 2000, 9999, '13,14,...,22', True),
+    (5, 'signals, опека (trustee flats)', 1, 9999, 'all', True),
+    (6, 'avans, Т-банк|запрет долги', 1, 9999, 'all', True),
+]
+
+# === FILTERS =============================================================
+print('=== FILTERS ===')
+deleted = clear_table('FILTERS')
+print(f'  cleared {deleted} old rows')
+filters_rows = []
+for fid, name, min_y, max_y, dists, active in FILTERS_DEF:
+    filters_rows.append({
+        'filter_id': fid,
+        'name': name,
+        'description': name,
+        'min_year': min_y,
+        'max_year': max_y,
+        'districts': dists,
+        'active': active,
+    })
+added = bulk_insert('FILTERS', filters_rows)
+print(f'  inserted {added}/{len(filters_rows)} filter rows')
+
+# === Аванс (Table2) =====================================================
+print()
+print('=== Table2 Аванс (active, filter_id=6) ===')
+deleted = clear_table('Table2')
+print(f'  cleared {deleted} old rows')
+cur.execute("""
+    SELECT source, cian_id, external_id, url, house_id, cian_house_id, price, price_per_m2,
+           area, rooms, floor_current, floor_total, metro_station, metro_walk_time,
+           district, okrug, renovation, is_active, days_in_exposition, total_views,
+           unique_views, publish_date, filter_id, parsed_at, updated_at
+    FROM active_ads
+    WHERE filter_id = 6
+    ORDER BY id
+""")
+cols = [d[0] for d in cur.description]
+avans_rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+added = bulk_insert('Table2', avans_rows)
+print(f'  inserted {added}/{len(avans_rows)} avans active ads')
+
+# === Аванс_Продано (Table3) ==============================================
+# All sold_ads for the same houses that have avans active ads.
+print()
+print('=== Table3 Аванс_Продано (sold for avans houses) ===')
+deleted = clear_table('Table3')
+print(f'  cleared {deleted} old rows')
+cur.execute("""
+    SELECT s.source, s.external_id, s.url, s.house_id, s.cian_house_id, s.price,
+           s.price_per_m2, s.area, s.rooms, s.floor_current, s.floor_total,
+           s.renovation, s.exposition_days, s.publish_date, s.sold_date, s.parsed_at
+    FROM sold_ads s
+    WHERE s.house_id IN (SELECT house_id FROM active_ads WHERE filter_id = 6 AND house_id IS NOT NULL)
+    ORDER BY s.sold_date DESC NULLS LAST, s.id DESC
+    LIMIT 5000
+""")
+cols = [d[0] for d in cur.description]
+rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+added = bulk_insert('Table3', rows)
+print(f'  inserted {added}/{len(rows)} avans sold ads')
+
+# === Balans =============================================================
+# Per-filter aggregate: filter_id, name, active_count, sold_count, avg_price.
+print()
+print('=== Balans (per-filter aggregate) ===')
+deleted = clear_table('Balans')
+print(f'  cleared {deleted} old rows')
+cur.execute("""
+    SELECT filter_id, COUNT(*) AS active_count, AVG(price)::bigint AS avg_price,
+           MIN(price) AS min_price, MAX(price) AS max_price
+    FROM active_ads
+    GROUP BY filter_id
+    ORDER BY filter_id
+""")
+balans_rows = []
+for fid, active_cnt, avg_p, min_p, max_p in cur.fetchall():
+    name = next((n for fid2, n, *_ in FILTERS_DEF if fid2 == fid), f'filter_{fid}')
+    balans_rows.append({
+        'filter_id': fid,
+        'name': name,
+        'active_count': active_cnt,
+        'avg_price': int(avg_p) if avg_p else None,
+        'min_price': min_p,
+        'max_price': max_p,
+    })
+added = bulk_insert('Balans', balans_rows)
+print(f'  inserted {added}/{len(balans_rows)} balans aggregate rows')
+
+# === Offers_Parser ======================================================
+print()
+print('=== Offers_Parser (active, filter_id IN 1,2,3,4) ===')
+deleted = clear_table('Offers_Parser')
+print(f'  cleared {deleted} old rows')
+cur.execute("""
+    SELECT source, cian_id, external_id, url, house_id, cian_house_id, price, price_per_m2,
+           area, rooms, floor_current, floor_total, metro_station, metro_walk_time,
+           district, okrug, renovation, is_active, days_in_exposition, total_views,
+           unique_views, publish_date, filter_id, parsed_at, updated_at
+    FROM active_ads
+    WHERE filter_id IN (1, 2, 3, 4)
+    ORDER BY filter_id, id
+""")
+cols = [d[0] for d in cur.description]
+rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+added = bulk_insert('Offers_Parser', rows)
+print(f'  inserted {added}/{len(rows)} offers active ads')
+
+# === Signals_Parser =====================================================
+print()
+print('=== Signals_Parser (active, filter_id=5) ===')
+deleted = clear_table('Signals_Parser')
+print(f'  cleared {deleted} old rows')
+cur.execute("""
+    SELECT source, cian_id, external_id, url, house_id, cian_house_id, price, price_per_m2,
+           area, rooms, floor_current, floor_total, metro_station, metro_walk_time,
+           district, okrug, renovation, is_active, days_in_exposition, total_views,
+           unique_views, publish_date, filter_id, parsed_at, updated_at
+    FROM active_ads
+    WHERE filter_id = 5
+    ORDER BY id
+""")
+cols = [d[0] for d in cur.description]
+rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+added = bulk_insert('Signals_Parser', rows)
+print(f'  inserted {added}/{len(rows)} signals active ads')
+
+cur.close()
+conn.close()
+
+print()
+print('DONE. All 6 empty tables in Парсинг doc now have data.')

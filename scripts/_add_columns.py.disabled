@@ -1,0 +1,119 @@
+"""
+Add columns to the 5 empty Парсинг tables, then bulk-insert data.
+"""
+import json
+import sys
+import time
+import urllib.request
+import urllib.parse
+import psycopg2
+
+GRIST_URL = 'http://localhost:8484'
+GRIST_KEY = 'flipper_prod_c173df83d342e744aa1fa74bb80bd19a32f5f598d7e582c0c8d4561659290978'
+DOC_ID = 'mDaHoGD6yahtxaqugwr5mK'
+
+def grist_apply(actions):
+    body = json.dumps(actions).encode()
+    req = urllib.request.Request(
+        f'{GRIST_URL}/api/docs/{DOC_ID}/apply',
+        data=body,
+        headers={'Authorization': f'Bearer {GRIST_KEY}', 'Content-Type': 'application/json'},
+        method='POST',
+    )
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return json.loads(r.read())
+
+def grist_post_records(table, records):
+    body = json.dumps({'records': records}).encode()
+    req = urllib.request.Request(
+        f'{GRIST_URL}/api/docs/{DOC_ID}/tables/{table}/records',
+        data=body,
+        headers={'Authorization': f'Bearer {GRIST_KEY}', 'Content-Type': 'application/json'},
+        method='POST',
+    )
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return json.loads(r.read())
+
+def add_columns(table, cols):
+    """Add a list of (colId, type) to a table in one BulkAddColumn call."""
+    col_ids = [c[0] for c in cols]
+    col_types = [c[1] for c in cols]
+    return grist_apply([['BulkAddColumn', table, col_ids, col_types]])
+
+# Schema for ACTIVE ads (Table2 Аванс, Offers_Parser, Signals_Parser)
+ACTIVE_COLS = [
+    ('source', 'Text'),
+    ('pg_id', 'Numeric'),
+    ('cian_id', 'Text'),
+    ('external_id', 'Text'),
+    ('url', 'Text'),
+    ('house_id', 'Numeric'),
+    ('cian_house_id', 'Numeric'),
+    ('price', 'Numeric'),
+    ('price_per_m2', 'Numeric'),
+    ('area', 'Numeric'),
+    ('rooms', 'Numeric'),
+    ('floor_current', 'Numeric'),
+    ('floor_total', 'Numeric'),
+    ('metro_station', 'Text'),
+    ('metro_walk_time', 'Numeric'),
+    ('district', 'Text'),
+    ('okrug', 'Text'),
+    ('renovation', 'Text'),
+    ('is_active', 'Bool'),
+    ('days_in_exposition', 'Numeric'),
+    ('total_views', 'Numeric'),
+    ('unique_views', 'Numeric'),
+    ('publish_date', 'Date'),
+    ('filter_id', 'Numeric'),
+    ('parsed_at', 'DateTime'),
+    ('updated_at', 'DateTime'),
+]
+
+# Schema for SOLD ads (Table3 Аванс_Продано)
+SOLD_COLS = [
+    ('source', 'Text'),
+    ('pg_id', 'Numeric'),
+    ('external_id', 'Text'),
+    ('url', 'Text'),
+    ('house_id', 'Numeric'),
+    ('cian_house_id', 'Numeric'),
+    ('price', 'Numeric'),
+    ('price_per_m2', 'Numeric'),
+    ('area', 'Numeric'),
+    ('rooms', 'Numeric'),
+    ('floor_current', 'Numeric'),
+    ('floor_total', 'Numeric'),
+    ('renovation', 'Text'),
+    ('exposition_days', 'Numeric'),
+    ('publish_date', 'Date'),
+    ('sold_date', 'Date'),
+    ('parsed_at', 'DateTime'),
+]
+
+# Schema for Balans (aggregate)
+BALANS_COLS = [
+    ('filter_id', 'Numeric'),
+    ('name', 'Text'),
+    ('active_count', 'Numeric'),
+    ('avg_price', 'Numeric'),
+    ('min_price', 'Numeric'),
+    ('max_price', 'Numeric'),
+]
+
+if sys.argv[1] == 'add':
+    for tbl, cols in [
+        ('Table2', ACTIVE_COLS),
+        ('Table3', SOLD_COLS),
+        ('Balans', BALANS_COLS),
+        ('Offers_Parser', ACTIVE_COLS),
+        ('Signals_Parser', ACTIVE_COLS),
+    ]:
+        try:
+            r = add_columns(tbl, cols)
+            print(f'  {tbl}: added {len(cols)} cols → {r}')
+        except urllib.error.HTTPError as e:
+            body = e.read().decode()
+            print(f'  {tbl}: FAIL {e.code} {body[:200]}')
+else:
+    print('Usage: py _add_columns.py add', file=sys.stderr)

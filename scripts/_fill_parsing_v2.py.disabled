@@ -1,0 +1,199 @@
+"""
+Faster: use BulkAddRecord via /apply (one round-trip per 1000 rows)
+instead of POST /tables/{id}/records (one round-trip per 200 rows).
+"""
+import json
+import urllib.request
+import urllib.parse
+import sys
+import time
+import psycopg2
+
+GRIST_URL = 'http://localhost:8484'
+GRIST_KEY = 'flipper_prod_c173df83d342e744aa1fa74bb80bd19a32f5f598d7e582c0c8d4561659290978'
+DOC_ID = 'mDaHoGD6yahtxaqugwr5mK'
+
+# Local PG
+conn = psycopg2.connect(host='127.0.0.1', port=5432, user='flipper', password='flipper_secret', dbname='flipper')
+cur = conn.cursor()
+
+def grist_apply(actions):
+    body = json.dumps(actions).encode()
+    req = urllib.request.Request(
+        f'{GRIST_URL}/api/docs/{DOC_ID}/apply',
+        data=body,
+        headers={'Authorization': f'Bearer {GRIST_KEY}', 'Content-Type': 'application/json'},
+        method='POST',
+    )
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return json.loads(r.read())
+
+def grist_sql(q):
+    req = urllib.request.Request(
+        f'{GRIST_URL}/api/docs/{DOC_ID}/sql?q=' + urllib.parse.quote(q),
+        headers={'Authorization': f'Bearer {GRIST_KEY}'},
+    )
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.loads(r.read())
+
+def to_fields(d):
+    """Drop reserved cols + None + convert date to ISO."""
+    out = {}
+    for k, v in d.items():
+        if k in {'id', 'manualSort'}:
+            continue
+        if v is None:
+            continue
+        if hasattr(v, 'isoformat'):
+            out[k] = v.isoformat()
+        else:
+            out[k] = v
+    return out
+
+def bulk_add(table, dicts, batch=1000):
+    """Use BulkAddRecord via /apply. Faster than POST /records."""
+    added = 0
+    t0 = time.time()
+    for i in range(0, len(dicts), batch):
+        chunk = [to_fields(d) for d in dicts[i:i+batch]]
+        try:
+            r = grist_apply([['BulkAddRecord', table, chunk]])
+            added += len(chunk)
+        except urllib.error.HTTPError as e:
+            body = e.read().decode()
+            print(f'   FAIL @ batch {i}: {e.code} {body[:300]}', file=sys.stderr, flush=True)
+            # Try smaller batches
+            for j in range(0, len(chunk), 100):
+                sub = chunk[j:j+100]
+                try:
+                    grist_apply([['BulkAddRecord', table, sub]])
+                    added += len(sub)
+                except urllib.error.HTTPError as e2:
+                    body2 = e2.read().decode()
+                    print(f'      FAIL @ {i+j}: {body2[:200]}', file=sys.stderr, flush=True)
+        elapsed = time.time() - t0
+        rate = added / elapsed if elapsed > 0 else 0
+        print(f'   {added}/{len(dicts)} ({rate:.0f}/s)', flush=True)
+    return added
+
+def clear_table(table):
+    r = grist_sql(f'SELECT id FROM {table}')
+    ids = [row['fields']['id'] for row in r['records']]
+    if not ids:
+        return 0
+    for i in range(0, len(ids), 1000):
+        chunk = ids[i:i+1000]
+        grist_apply([['BulkRemoveRecord', table, chunk]])
+    return len(ids)
+
+def table_count(table):
+    r = grist_sql(f'SELECT COUNT(*) AS c FROM {table}')
+    return r['records'][0]['fields']['c']
+
+# === MAIN ================================================================
+target = sys.argv[1] if len(sys.argv) > 1 else 'all'
+
+if target in ('Table2', 'all'):
+    print('=== Table2 Аванс (active, filter_id=6) ===', flush=True)
+    cleared = clear_table('Table2')
+    print(f'  cleared {cleared}', flush=True)
+    cur.execute("""
+        SELECT source, cian_id, external_id, url, house_id, cian_house_id, price, price_per_m2,
+               area, rooms, floor_current, floor_total, metro_station, metro_walk_time,
+               district, okrug, renovation, is_active, days_in_exposition, total_views,
+               unique_views, publish_date, filter_id, parsed_at, updated_at
+        FROM active_ads WHERE filter_id = 6 ORDER BY id
+    """)
+    cols = [d[0] for d in cur.description]
+    rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+    print(f'  fetched {len(rows)} from local PG', flush=True)
+    added = bulk_add('Table2', rows)
+    print(f'  DONE Table2: {added} rows', flush=True)
+
+if target in ('Table3', 'all'):
+    print('=== Table3 Аванс_Продано (sold for avans houses) ===', flush=True)
+    cleared = clear_table('Table3')
+    print(f'  cleared {cleared}', flush=True)
+    cur.execute("""
+        SELECT s.source, s.external_id, s.url, s.house_id, s.cian_house_id, s.price,
+               s.price_per_m2, s.area, s.rooms, s.floor_current, s.floor_total,
+               s.renovation, s.exposition_days, s.publish_date, s.sold_date, s.parsed_at
+        FROM sold_ads s
+        WHERE s.house_id IN (SELECT house_id FROM active_ads WHERE filter_id = 6 AND house_id IS NOT NULL)
+        ORDER BY s.sold_date DESC NULLS LAST, s.id DESC
+        LIMIT 5000
+    """)
+    cols = [d[0] for d in cur.description]
+    rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+    print(f'  fetched {len(rows)} from local PG', flush=True)
+    added = bulk_add('Table3', rows)
+    print(f'  DONE Table3: {added} rows', flush=True)
+
+if target in ('Balans', 'all'):
+    print('=== Balans (per-filter stats) ===', flush=True)
+    cleared = clear_table('Balans')
+    print(f'  cleared {cleared}', flush=True)
+    FILTERS_DEF = {
+        1: 'offers, max_year=2000, dists=23-132',
+        2: 'offers, min_year=2000, dists=23-132',
+        3: 'offers, max_year=2000, dists=13-22',
+        4: 'offers, min_year=2000, dists=13-22',
+        5: 'signals, опека',
+        6: 'avans, Т-банк|запрет долги',
+    }
+    cur.execute("""
+        SELECT filter_id, COUNT(*), AVG(price)::bigint, MIN(price), MAX(price)
+        FROM active_ads GROUP BY filter_id ORDER BY filter_id
+    """)
+    rows = []
+    for fid, cnt, avg, mn, mx in cur.fetchall():
+        rows.append({
+            'filter_id': fid,
+            'name': FILTERS_DEF.get(fid, f'filter_{fid}'),
+            'active_count': cnt,
+            'avg_price': int(avg) if avg else None,
+            'min_price': mn,
+            'max_price': mx,
+        })
+    print(f'  fetched {len(rows)} from local PG', flush=True)
+    added = bulk_add('Balans', rows)
+    print(f'  DONE Balans: {added} rows', flush=True)
+
+if target in ('Offers_Parser', 'all'):
+    print('=== Offers_Parser (active, filter_id IN 1,2,3,4) ===', flush=True)
+    cleared = clear_table('Offers_Parser')
+    print(f'  cleared {cleared}', flush=True)
+    cur.execute("""
+        SELECT source, cian_id, external_id, url, house_id, cian_house_id, price, price_per_m2,
+               area, rooms, floor_current, floor_total, metro_station, metro_walk_time,
+               district, okrug, renovation, is_active, days_in_exposition, total_views,
+               unique_views, publish_date, filter_id, parsed_at, updated_at
+        FROM active_ads
+        WHERE filter_id IN (1, 2, 3, 4) ORDER BY filter_id, id
+    """)
+    cols = [d[0] for d in cur.description]
+    rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+    print(f'  fetched {len(rows)} from local PG', flush=True)
+    added = bulk_add('Offers_Parser', rows)
+    print(f'  DONE Offers_Parser: {added} rows', flush=True)
+
+if target in ('Signals_Parser', 'all'):
+    print('=== Signals_Parser (active, filter_id=5) ===', flush=True)
+    cleared = clear_table('Signals_Parser')
+    print(f'  cleared {cleared}', flush=True)
+    cur.execute("""
+        SELECT source, cian_id, external_id, url, house_id, cian_house_id, price, price_per_m2,
+               area, rooms, floor_current, floor_total, metro_station, metro_walk_time,
+               district, okrug, renovation, is_active, days_in_exposition, total_views,
+               unique_views, publish_date, filter_id, parsed_at, updated_at
+        FROM active_ads WHERE filter_id = 5 ORDER BY id
+    """)
+    cols = [d[0] for d in cur.description]
+    rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+    print(f'  fetched {len(rows)} from local PG', flush=True)
+    added = bulk_add('Signals_Parser', rows)
+    print(f'  DONE Signals_Parser: {added} rows', flush=True)
+
+cur.close()
+conn.close()
+print('ALL DONE', flush=True)
