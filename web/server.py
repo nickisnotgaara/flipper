@@ -1798,6 +1798,120 @@ if __name__ == "__main__":
 # Server-side pagination, sort, search, filters. Returns `{rows, total, stats}`.
 # ---------------------------------------------------------------------------
 
+# Column metadata for each table tab. Drives the Univer sheet header rendering
+# on the frontend — `key` is the SQL alias, `label` is the Russian header text,
+# `type` is the cell kind (text/number/date/url), `editable` mirrors the PATCH
+# whitelist so the workbook can grey out read-only columns.
+_TABLE_COLUMNS = {
+    "active": [
+        {"key": "id", "label": "ID", "type": "number", "editable": False, "width": 70},
+        {"key": "source", "label": "Источник", "type": "text", "editable": False, "width": 90},
+        {"key": "external_id", "label": "cian_id", "type": "text", "editable": False, "width": 90},
+        {"key": "title", "label": "Заголовок", "type": "text", "editable": False, "width": 240},
+        {"key": "url", "label": "Ссылка", "type": "url", "editable": False, "width": 220},
+        {"key": "price", "label": "Цена", "type": "number", "editable": False, "width": 110},
+        {"key": "price_per_m2", "label": "Цена/м²", "type": "number", "editable": False, "width": 100},
+        {"key": "area", "label": "Площадь", "type": "number", "editable": False, "width": 80},
+        {"key": "rooms", "label": "Комнат", "type": "number", "editable": False, "width": 70},
+        {"key": "floor_current", "label": "Этаж", "type": "number", "editable": False, "width": 60},
+        {"key": "floor_total", "label": "Этажей", "type": "number", "editable": False, "width": 60},
+        {"key": "district", "label": "Район", "type": "text", "editable": True, "width": 150},
+        {"key": "okrug", "label": "Округ", "type": "text", "editable": True, "width": 120},
+        {"key": "metro_station", "label": "Метро", "type": "text", "editable": True, "width": 150},
+        {"key": "metro_walk_time", "label": "До метро, мин", "type": "number", "editable": True, "width": 80},
+        {"key": "renovation", "label": "Ремонт", "type": "text", "editable": True, "width": 130},
+        {"key": "days_in_exposition", "label": "Дней на сайте", "type": "number", "editable": False, "width": 90},
+        {"key": "publish_date", "label": "Опубликовано", "type": "date", "editable": False, "width": 110},
+        {"key": "filter_id", "label": "Фильтр", "type": "number", "editable": True, "width": 70},
+        {"key": "house_id", "label": "Дом", "type": "number", "editable": False, "width": 70},
+    ],
+    "sold": [
+        {"key": "id", "label": "ID", "type": "number", "editable": False, "width": 70},
+        {"key": "source", "label": "Источник", "type": "text", "editable": False, "width": 90},
+        {"key": "external_id", "label": "cian_id", "type": "text", "editable": False, "width": 90},
+        {"key": "title", "label": "Заголовок", "type": "text", "editable": False, "width": 240},
+        {"key": "url", "label": "Ссылка", "type": "url", "editable": False, "width": 220},
+        {"key": "price", "label": "Цена", "type": "number", "editable": False, "width": 110},
+        {"key": "price_per_m2", "label": "Цена/м²", "type": "number", "editable": False, "width": 100},
+        {"key": "area", "label": "Площадь", "type": "number", "editable": False, "width": 80},
+        {"key": "rooms", "label": "Комнат", "type": "number", "editable": False, "width": 70},
+        {"key": "renovation", "label": "Ремонт", "type": "text", "editable": True, "width": 130},
+        {"key": "sold_date", "label": "Продано", "type": "date", "editable": False, "width": 110},
+        {"key": "days_in_exposition", "label": "Дней на сайте", "type": "number", "editable": False, "width": 90},
+        {"key": "house_id", "label": "Дом", "type": "number", "editable": False, "width": 70},
+    ],
+    "hidden": [
+        {"key": "id", "label": "ID", "type": "number", "editable": False, "width": 70},
+        {"key": "source", "label": "Источник", "type": "text", "editable": False, "width": 90},
+        {"key": "external_id", "label": "cian_id", "type": "text", "editable": False, "width": 90},
+        {"key": "title", "label": "Заголовок", "type": "text", "editable": False, "width": 240},
+        {"key": "url", "label": "Ссылка", "type": "url", "editable": False, "width": 220},
+        {"key": "price", "label": "Цена", "type": "number", "editable": False, "width": 110},
+        {"key": "price_per_m2", "label": "Цена/м²", "type": "number", "editable": False, "width": 100},
+        {"key": "area", "label": "Площадь", "type": "number", "editable": False, "width": 80},
+        {"key": "rooms", "label": "Комнат", "type": "number", "editable": False, "width": 70},
+        {"key": "renovation", "label": "Ремонт", "type": "text", "editable": True, "width": 130},
+        {"key": "sold_date", "label": "Снято", "type": "date", "editable": False, "width": 110},
+        {"key": "days_in_exposition", "label": "Дней на сайте", "type": "number", "editable": False, "width": 90},
+        {"key": "house_id", "label": "Дом", "type": "number", "editable": False, "width": 70},
+    ],
+    "houses": [
+        {"key": "id", "label": "ID", "type": "number", "editable": False, "width": 70},
+        {"key": "source", "label": "Источник", "type": "text", "editable": False, "width": 110},
+        {"key": "address", "label": "Адрес", "type": "text", "editable": True, "width": 240},
+        {"key": "street", "label": "Улица", "type": "text", "editable": True, "width": 150},
+        {"key": "house_num", "label": "Дом", "type": "text", "editable": True, "width": 70},
+        {"key": "year", "label": "Год постройки", "type": "number", "editable": True, "width": 90},
+        {"key": "levels", "label": "Этажей", "type": "number", "editable": True, "width": 70},
+        {"key": "type", "label": "Тип", "type": "text", "editable": True, "width": 110},
+        {"key": "series", "label": "Серия", "type": "text", "editable": True, "width": 110},
+        {"key": "lat", "label": "Широта", "type": "number", "editable": False, "width": 90},
+        {"key": "lng", "label": "Долгота", "type": "number", "editable": False, "width": 90},
+        {"key": "active_count", "label": "Активных", "type": "number", "editable": False, "width": 80},
+        {"key": "deactivated_count", "label": "Снято", "type": "number", "editable": False, "width": 80},
+    ],
+    # The three derived tabs reuse the "active" endpoint with pre-set filters.
+    # Columns are a curated subset focused on parser URLs / sources.
+    "filters": [
+        {"key": "id", "label": "ID", "type": "number", "editable": False, "width": 70},
+        {"key": "external_id", "label": "cian_id", "type": "text", "editable": False, "width": 90},
+        {"key": "url", "label": "URL парсера", "type": "url", "editable": False, "width": 360},
+        {"key": "filter_id", "label": "Фильтр", "type": "number", "editable": False, "width": 70},
+        {"key": "source", "label": "Источник", "type": "text", "editable": False, "width": 90},
+        {"key": "district", "label": "Район", "type": "text", "editable": False, "width": 150},
+        {"key": "price", "label": "Цена", "type": "number", "editable": False, "width": 110},
+    ],
+    "avans": [
+        {"key": "id", "label": "ID", "type": "number", "editable": False, "width": 70},
+        {"key": "external_id", "label": "cian_id", "type": "text", "editable": False, "width": 90},
+        {"key": "title", "label": "Заголовок", "type": "text", "editable": False, "width": 240},
+        {"key": "url", "label": "Ссылка", "type": "url", "editable": False, "width": 220},
+        {"key": "price", "label": "Цена", "type": "number", "editable": False, "width": 110},
+        {"key": "area", "label": "Площадь", "type": "number", "editable": False, "width": 80},
+        {"key": "rooms", "label": "Комнат", "type": "number", "editable": False, "width": 70},
+        {"key": "filter_id", "label": "Фильтр", "type": "number", "editable": False, "width": 70},
+        {"key": "district", "label": "Район", "type": "text", "editable": False, "width": 150},
+    ],
+    "offers": [
+        {"key": "id", "label": "ID", "type": "number", "editable": False, "width": 70},
+        {"key": "external_id", "label": "cian_id", "type": "text", "editable": False, "width": 90},
+        {"key": "title", "label": "Заголовок", "type": "text", "editable": False, "width": 240},
+        {"key": "url", "label": "Ссылка", "type": "url", "editable": False, "width": 220},
+        {"key": "price", "label": "Цена", "type": "number", "editable": False, "width": 110},
+        {"key": "price_per_m2", "label": "Цена/м²", "type": "number", "editable": False, "width": 100},
+        {"key": "area", "label": "Площадь", "type": "number", "editable": False, "width": 80},
+        {"key": "rooms", "label": "Комнат", "type": "number", "editable": False, "width": 70},
+        {"key": "filter_id", "label": "Фильтр", "type": "number", "editable": False, "width": 70},
+        {"key": "district", "label": "Район", "type": "text", "editable": False, "width": 150},
+        {"key": "publish_date", "label": "Опубликовано", "type": "date", "editable": False, "width": 110},
+    ],
+}
+
+# Three derived tabs are direct configs of active_ads with a different
+# `source_filter` so the SQL layer doesn't need a special pre-baked query path.
+# "filters"   → all active ads (parser URL view, all sources)
+# "avans"     → active ads from the "avans" source (filter_id=6)
+# "offers"    → active ads from the "offers" source (filter_id 1–4)
 _TABLE_CONFIGS = {
     "active": {
         "table": "active_ads",
@@ -1873,6 +1987,48 @@ _TABLE_CONFIGS = {
             "ceiling_height": float,
         },
     },
+    "filters": {
+        "table": "active_ads",
+        "source_filter": None,  # all active sources (cian_active + avans + offers)
+        "select": "id, source, external_id, url, price, price_per_m2, area, rooms, "
+                  "floor_current, floor_total, district, okrug, metro_station, metro_walk_time, "
+                  "renovation, days_in_exposition, "
+                  "CASE WHEN rooms IS NULL OR rooms = 0 "
+                  "  THEN 'Студия ' || COALESCE(area::text, '') || ' м²' "
+                  "  ELSE rooms::text || '-к квартира ' || COALESCE(area::text, '') || ' м²' "
+                  "END AS title, "
+                  "publish_date, filter_id, house_id",
+        "search_cols": ["external_id", "url", "district", "raw_data"],
+        "editable": {},  # read-only curated parser URL view
+    },
+    "avans": {
+        "table": "active_ads",
+        "source_filter": "source='avans'",
+        "select": "id, source, external_id, url, price, price_per_m2, area, rooms, "
+                  "floor_current, floor_total, district, okrug, metro_station, metro_walk_time, "
+                  "renovation, days_in_exposition, "
+                  "CASE WHEN rooms IS NULL OR rooms = 0 "
+                  "  THEN 'Студия ' || COALESCE(area::text, '') || ' м²' "
+                  "  ELSE rooms::text || '-к квартира ' || COALESCE(area::text, '') || ' м²' "
+                  "END AS title, "
+                  "publish_date, filter_id, house_id",
+        "search_cols": ["external_id", "district", "raw_data"],
+        "editable": {},  # read-only for now (avans tabs are parser-driven)
+    },
+    "offers": {
+        "table": "active_ads",
+        "source_filter": "source='offers'",
+        "select": "id, source, external_id, url, price, price_per_m2, area, rooms, "
+                  "floor_current, floor_total, district, okrug, metro_station, metro_walk_time, "
+                  "renovation, days_in_exposition, "
+                  "CASE WHEN rooms IS NULL OR rooms = 0 "
+                  "  THEN 'Студия ' || COALESCE(area::text, '') || ' м²' "
+                  "  ELSE rooms::text || '-к квартира ' || COALESCE(area::text, '') || ' м²' "
+                  "END AS title, "
+                  "publish_date, filter_id, house_id",
+        "search_cols": ["external_id", "district", "raw_data"],
+        "editable": {},  # read-only for now
+    },
 }
 
 
@@ -1901,7 +2057,10 @@ def _table_query(name: str):
 async def _fetch_table_rows(name: str, params: dict) -> dict:
     """Generic paginated table fetch with sort + search + filters.
 
-    Returns: {rows: [...], total: int, page, page_size, stats: {...}}
+    All seven tabs (active/sold/hidden/houses/filters/avans/offers) are direct
+    entries in _TABLE_CONFIGS, so this function takes `name` as-is.
+
+    Returns: {rows: [...], total: int, page, page_size, stats: {...}, columns: [...]}
     """
     cfg = _table_query(name)
     if not cfg:
@@ -2054,12 +2213,17 @@ async def _fetch_table_rows(name: str, params: dict) -> dict:
             if hasattr(v, "isoformat"):
                 row[k] = v.isoformat()
 
+    # Column metadata for the Univer workbook renderer. We pass the full
+    # _TABLE_COLUMNS entry (not just the keys that the SELECT actually
+    # returned) so the workbook can still show labels for derived tabs
+    # like "filters"/"avans"/"offers" whose SELECT only includes a subset.
     return {
         "rows": rows,
         "total": int(total or 0),
         "page": page,
         "page_size": page_size,
         "stats": stats,
+        "columns": _TABLE_COLUMNS.get(name, []),
     }
 
 
@@ -2081,6 +2245,21 @@ async def table_hidden(request: Request):
 @app.get("/api/tables/houses")
 async def table_houses(request: Request):
     return await _fetch_table_rows("houses", dict(request.query_params))
+
+
+@app.get("/api/tables/filters")
+async def table_filters(request: Request):
+    return await _fetch_table_rows("filters", dict(request.query_params))
+
+
+@app.get("/api/tables/avans")
+async def table_avans(request: Request):
+    return await _fetch_table_rows("avans", dict(request.query_params))
+
+
+@app.get("/api/tables/offers")
+async def table_offers(request: Request):
+    return await _fetch_table_rows("offers", dict(request.query_params))
 
 
 @app.get("/api/tables/{name}/export")

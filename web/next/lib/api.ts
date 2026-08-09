@@ -1,5 +1,6 @@
 // Lightweight API client. Talks to FastAPI at 127.0.0.1:8000 directly.
-const BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:8000';
+export const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:8000';
+const BASE = API_BASE;
 
 export type SuggestItem = {
   title: string;

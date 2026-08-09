@@ -14,6 +14,8 @@
     "@tanstack/react-query": "^5.101.4",
     "@tanstack/react-table": "^8.21.3",
     "@tanstack/react-virtual": "^3.14.9",
+    "@univerjs/preset-sheets-core": "^0.25.1",
+    "@univerjs/presets": "^0.25.1",
     "embla-carousel-react": "^8.6.0",
     "framer-motion": "^11.18.2",
     "leaflet": "1.9.4",
