@@ -29,7 +29,7 @@ type NavItem = {
 };
 
 // === Grist configuration ==================================================
-// Документы: Парсинг (7 таблиц) и Архивы (6 таблиц), Main (5 таблиц).
+// Документы: Парсинг (6 таблиц) и Архивы (6 таблиц), Main (5 таблиц).
 // Все три открываются в живой Grist UI — пользователь получает полный
 // доступ ко всем функциям (формулы, charts, pivot, edit, export).
 const GRIST_URL = 'http://localhost:8484';
@@ -38,14 +38,17 @@ const DOCS = {
   archives: 'kaBfATwGgUYjDa8doqMzk3',
   main: 'rYyn6wJZihqm1TAgkBgPnY',
 };
-const gristLink = (docId: string) => `${GRIST_URL}/${docId}/p/1`;
+/** Deep link to a specific Grist page (each page = one table in this doc). */
+const gristLink = (docId: string, pageId: number) => `${GRIST_URL}/${docId}/p/${pageId}`;
 
 // === Primary nav: Карта + 3 Grist документа =============================
+// Парсинг открывается на Продано (самая большая таблица — 3,115 строк).
+// Внутри Grist юзер может переключиться на FILTERS, Аванс, Balans и т.д.
 const PRIMARY: NavItem[] = [
   { label: 'Карта', href: '/map', icon: Map, group: 'primary' },
-  { label: 'Парсинг', href: gristLink(DOCS.parsing), icon: Database, group: 'primary', badge: 'Grist', external: true },
-  { label: 'Архивы', href: gristLink(DOCS.archives), icon: Archive, group: 'primary', badge: 'Grist', external: true },
-  { label: 'Дома', href: gristLink(DOCS.main), icon: Home, group: 'primary', badge: 'Grist', external: true },
+  { label: 'Парсинг', href: gristLink(DOCS.parsing, 15), icon: Database, group: 'primary', badge: 'Grist', external: true },
+  { label: 'Архивы', href: gristLink(DOCS.archives, 1), icon: Archive, group: 'primary', badge: 'Grist', external: true },
+  { label: 'Дома', href: gristLink(DOCS.main, 1), icon: Home, group: 'primary', badge: 'Grist', external: true },
 ];
 
 const MORE: NavItem[] = [
