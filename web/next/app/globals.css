@@ -320,6 +320,24 @@ table, .tabular-nums {
   100% { transform: translateY(0)     scale(1);    opacity: 1; }
 }
 
+/* ============== Univer (spreadsheet) overrides ==============
+ * Strip Univer's default right-side panel sidebar and any leftover
+ * Office-style chrome. We're rendering our own top bar + bottom tab
+ * strip, and any Univer sidebar (e.g. cell-format panel) is dead UI
+ * for us. Hiding the elements via CSS keeps Univer's reactive workbench
+ * happy while removing the visual noise.
+ */
+.univer-sidebar,
+.univer-workbench-layout-sidebar,
+.univer-panel-sidebar,
+[class*="univer-sidebar"],
+header[role="banner"] {
+  display: none !important;
+}
+/* Hide the Univer container scrollbar that conflicts with our scroll. */
+.univer-container ::-webkit-scrollbar { width: 8px; height: 8px; }
+.univer-container ::-webkit-scrollbar-thumb { background: var(--rule); }
+
 /* ============== Embla (photo carousel) ============== */
 .embla-viewport {
   touch-action: pan-y !important;

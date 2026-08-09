@@ -233,6 +233,22 @@ export default function FlipperWorkbook() {
     univerAPIRef.current = univerAPI;
     setReady(true);
 
+    // Force Univer to re-measure its container. The dynamic-import +
+    // mount happens before the layout has settled, so the canvas can
+    // latch onto the initial (smaller) container width and refuse to
+    // grow. A resize event after a short delay (and another on
+    // ResizeObserver changes) tells Univer to re-layout.
+    const triggerResize = () => {
+      window.dispatchEvent(new Event('resize'));
+    };
+    const resizeT = setTimeout(triggerResize, 50);
+    const resizeT2 = setTimeout(triggerResize, 300);
+    let ro: ResizeObserver | null = null;
+    if (containerRef.current && typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => triggerResize());
+      ro.observe(containerRef.current);
+    }
+
     // 2. Edit hook — fires on SheetEditEnded with isConfirm=true (Enter / blur).
     // We always allow Univer's UI to commit the edit visually first, then
     // fire PATCH in the background. Failed PATCH shows a flash message.
@@ -281,6 +297,9 @@ export default function FlipperWorkbook() {
     );
 
     return () => {
+      clearTimeout(resizeT);
+      clearTimeout(resizeT2);
+      if (ro) ro.disconnect();
       disposable.dispose();
       univer.dispose();
       univerRef.current = null;
@@ -456,8 +475,8 @@ export default function FlipperWorkbook() {
           the cell grid + column/row headers + slim formula bar. */}
       <div
         ref={containerRef}
-        className="flex-1 min-h-0 w-full"
-        style={{ background: 'var(--paper-card)' }}
+        className="univer-container flex-1 min-h-0 w-full"
+        style={{ background: 'var(--paper-card)', width: '100%' }}
       />
 
       {/* ===== Bottom tab strip ============================================ */}
