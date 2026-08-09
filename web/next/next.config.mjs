@@ -7,9 +7,10 @@ const nextConfig = {
   // Деплоится на Vercel / Netlify / Cloudflare Pages / nginx / S3+CDN.
   // При правке фронта пересобирается только ./out/, Docker не трогаем.
   output: 'export',
-  // trailingSlash нужен shared-хостингам и чтобы статика и API
-  // не конфликтовали на одном домене (/api/* → бэк, остальное → статика).
-  trailingSlash: true,
+  // trailingSlash: true в production-билде (next build → out/foo/index.html
+  // для shared-хостингов), но в dev-режиме (next dev) вызывает бесконечный
+  // редирект 308 → / 308 → /, и страница не грузится. Поэтому только в prod.
+  trailingSlash: process.env.NODE_ENV === 'production',
   // У Next Image отключаем оптимизатор (его некуда ставить без сервера).
   images: { unoptimized: true },
   // distDir оставляем дефолтный .next — `next export` сам кладёт готовую

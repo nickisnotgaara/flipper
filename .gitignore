@@ -97,6 +97,14 @@ web/next/tsconfig.tsbuildinfo
 web/next/page-bundle.js
 web/next/.env.local
 
+# Grist self-host stack
+minio-data/
+scripts/.grist_map.json
+web/next/app/_analytics_disabled/
+web/next/app/_analytics_disabled.disabled
+web/next/.next-stdout.log
+web/next/.next-stderr.log
+
 # OS generated files
 .DS_Store
 .DS_Store?

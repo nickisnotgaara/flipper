@@ -1,0 +1,55 @@
+version: "3.9"
+
+services:
+  grist:
+    image: gristlabs/grist:1.7.5
+    container_name: flipper_grist
+    restart: unless-stopped
+    env_file: ./grist.env
+    ports:
+      - "127.0.0.1:8484:8484"
+    volumes:
+      - grist-persist:/persist
+    depends_on:
+      - grist-postgres
+      - grist-minio
+
+  grist-postgres:
+    image: postgres:15-alpine
+    container_name: flipper_grist_db_v2
+    env_file: ./grist_db.env
+    volumes:
+      - grist-pgdata:/var/lib/postgresql/data
+
+  grist-minio:
+    image: minio/minio:RELEASE.2024-08-17T01-24-54Z
+    container_name: flipper_minio_v2
+    command: server /data --console-address ":9001"
+    env_file: ./minio.env
+    volumes:
+      - grist-minio-data:/data
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+
+  # MinIO client (mc) for one-shot bucket setup
+  minio-setup:
+    image: minio/mc:latest
+    container_name: flipper_minio_setup_v2
+    depends_on:
+      - grist-minio
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5 &&
+      mc alias set local http://grist-minio:9000 minio_admin minio_secret_change_me &&
+      mc mb --with-versioning local/grist-docs || true &&
+      mc anonymous set none local/grist-docs &&
+      echo 'MinIO bucket grist-docs ready (versioned).' &&
+      mc ls local/grist-docs
+      "
+    restart: "no"
+
+volumes:
+  grist-persist:
+  grist-pgdata:
+  grist-minio-data:
