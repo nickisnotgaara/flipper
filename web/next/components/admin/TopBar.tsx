@@ -14,7 +14,6 @@ const ROUTE_LABELS: Record<string, string> = {
   '/tables/sold': 'Снято',
   '/tables/hidden': 'Скрытые',
   '/tables/houses': 'Дома',
-  '/analytics': 'Аналитика',
   '/filters': 'Сохранённые фильтры',
   '/pipeline': 'Pipeline',
   '/settings': 'Настройки',

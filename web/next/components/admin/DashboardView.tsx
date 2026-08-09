@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import {
   Card,
   CardBody,
@@ -57,7 +58,7 @@ const HOT_HOUSES = [
 const QUICK = [
   { label: 'Карта', sub: 'Все маркеры, drill-down', icon: MapIcon, cls: 'bg-rose-50 text-rose-600', href: '/map' },
   { label: 'Активные', sub: '5 227 объявлений', icon: Table2, cls: 'bg-emerald-50 text-emerald-700', href: '/tables/active' },
-  { label: 'Аналитика', sub: 'Графики, распределения', icon: BarChart3, cls: 'bg-indigo-50 text-indigo-700', href: '/analytics' },
+  { label: 'Парсинг (Grist)', sub: 'Полный доступ к таблицам', icon: BarChart3, cls: 'bg-indigo-50 text-indigo-700', href: 'http://localhost:8484/mDaHoGD6yahtxaqugwr5mK/p/1', external: true },
   { label: 'Pipeline', sub: 'Парсеры, статус', icon: Activity, cls: 'bg-amber-50 text-amber-700', href: '/pipeline' },
 ];
 
@@ -242,11 +243,15 @@ export default function DashboardView() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {QUICK.map((q) => {
             const Icon = q.icon;
+            const sharedProps = q.external
+              ? { as: 'a' as const, href: q.href, target: '_blank', rel: 'noopener noreferrer' }
+              : { as: Link, href: q.href };
             return (
               <Card
                 key={q.label}
                 shadow="none"
                 isPressable
+                {...sharedProps}
                 className="border border-zinc-200 hover:border-zinc-900 transition-colors"
               >
                 <CardBody className="p-3.5">

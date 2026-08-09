@@ -8,8 +8,8 @@ const nextConfig = {
   // Фронт собирается в ./out/ — чистая статика без Node.js-сервера.
   // Деплоится на Vercel / Netlify / Cloudflare Pages / nginx / S3+CDN.
   // При правке фронта пересобирается только ./out/, Docker не трогаем.
-  // В dev-режиме output НЕ export — чтобы работал SSR / force-dynamic для
-  // страниц с server-side fetch (например /analytics → Grist API).
+  // В dev-режиме output НЕ export — чтобы работал SSR для force-dynamic
+  // страниц с server-side fetch.
   ...(isProd ? { output: 'export' } : {}),
   // trailingSlash: true в production-билде (next build → out/foo/index.html
   // для shared-хостингов), но в dev-режиме (next dev) вызывает бесконечный
@@ -19,10 +19,6 @@ const nextConfig = {
   images: { unoptimized: true },
   // distDir оставляем дефолтный .next — `next export` сам кладёт готовую
   // статику в ./out, а .next используется только на этапе сборки.
-
-  // Rewrites убраны: фронт ходит на бэк напрямую через
-  // NEXT_PUBLIC_API_BASE (см. .env.example). Раньше это был dev-костыль,
-  // чтобы обойти CORS при `docker compose --profile dev up`.
 };
 
 export default nextConfig;

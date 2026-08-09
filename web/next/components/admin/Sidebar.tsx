@@ -4,12 +4,14 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   Map,
-  BarChart3,
+  Database,
+  Archive,
+  Home,
   Bookmark,
   Activity,
   Settings,
-  Home,
   ChevronDown,
+  ExternalLink,
   type LucideIcon,
 } from 'lucide-react';
 import { useState } from 'react';
@@ -20,20 +22,30 @@ type NavItem = {
   href: string;
   icon: LucideIcon;
   badge?: number | string;
-  /** "primary" → Карта/Аналитика, the two main views. "more" → the rest,
-   *  visually demoted into a collapsible bottom group. */
+  /** "primary" → Карта + Grist docs. "more" → внутренние страницы. */
   group: 'primary' | 'more';
+  /** External link (target=_blank) instead of Next Link. */
+  external?: boolean;
 };
 
-// ---- Primary nav: just Карта + Аналитика (Grist iframe). -----------------
-// Аналитика — iframe с двумя табами: "Данные парсинга" и "База архивов".
-// Все таблицы (FILTERS, Аванс, Аванс_Продано, Продано, Balans, Offers_Parser,
-// Signals_Parser + CianSold, DomclickSold, WinnersNovostroiki, WinnersVtorichka,
-// FlatInfoHouses, HousesAll) живут в Grist.
+// === Grist configuration ==================================================
+// Документы: Парсинг (7 таблиц) и Архивы (6 таблиц), Main (5 таблиц).
+// Все три открываются в живой Grist UI — пользователь получает полный
+// доступ ко всем функциям (формулы, charts, pivot, edit, export).
+const GRIST_URL = 'http://localhost:8484';
+const DOCS = {
+  parsing: 'mDaHoGD6yahtxaqugwr5mK',
+  archives: 'kaBfATwGgUYjDa8doqMzk3',
+  main: 'rYyn6wJZihqm1TAgkBgPnY',
+};
+const gristLink = (docId: string) => `${GRIST_URL}/${docId}/p/1`;
 
+// === Primary nav: Карта + 3 Grist документа =============================
 const PRIMARY: NavItem[] = [
   { label: 'Карта', href: '/map', icon: Map, group: 'primary' },
-  { label: 'Аналитика', href: '/analytics', icon: BarChart3, group: 'primary', badge: 'Grist' },
+  { label: 'Парсинг', href: gristLink(DOCS.parsing), icon: Database, group: 'primary', badge: 'Grist', external: true },
+  { label: 'Архивы', href: gristLink(DOCS.archives), icon: Archive, group: 'primary', badge: 'Grist', external: true },
+  { label: 'Дома', href: gristLink(DOCS.main), icon: Home, group: 'primary', badge: 'Grist', external: true },
 ];
 
 const MORE: NavItem[] = [
@@ -54,11 +66,50 @@ export default function Sidebar() {
   const [moreOpen, setMoreOpen] = useState(MORE.some((m) => pathname === m.href));
 
   const isActive = (item: NavItem) =>
-    pathname === item.href || pathname.startsWith(item.href + '/');
+    item.external ? false : pathname === item.href || pathname.startsWith(item.href + '/');
 
   const renderItem = (item: NavItem) => {
     const Icon = item.icon;
     const active = isActive(item);
+    const className = [
+      'w-full justify-start gap-2.5 h-9 px-3 !rounded-md text-[13px]',
+      active
+        ? '!bg-[var(--ink)] !text-[var(--paper)] data-[hover=true]:!bg-[var(--ink-soft)] font-medium'
+        : '!text-[var(--ink-soft)] data-[hover=true]:!bg-[var(--paper-2)] data-[hover=true]:!text-[var(--ink)]',
+    ].join(' ');
+    const content = (
+      <>
+        <Icon size={15} strokeWidth={2} />
+        <span className="flex-1 text-left">{item.label}</span>
+        {item.badge != null && (
+          <span
+            className={[
+              'text-[10.5px] tabular-nums flex items-center gap-0.5',
+              active ? 'text-[var(--paper)] opacity-70' : 'text-[var(--ink-faint)]',
+            ].join(' ')}
+          >
+            {fmt(item.badge)}
+            {item.external && <ExternalLink size={9} strokeWidth={2.5} />}
+          </span>
+        )}
+      </>
+    );
+    if (item.external) {
+      return (
+        <Button
+          key={item.href}
+          as="a"
+          href={item.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          variant="light"
+          radius="sm"
+          className={className}
+        >
+          {content}
+        </Button>
+      );
+    }
     return (
       <Button
         key={item.href}
@@ -66,25 +117,9 @@ export default function Sidebar() {
         href={item.href}
         variant="light"
         radius="sm"
-        className={[
-          'w-full justify-start gap-2.5 h-9 px-3 !rounded-md text-[13px]',
-          active
-            ? '!bg-[var(--ink)] !text-[var(--paper)] data-[hover=true]:!bg-[var(--ink-soft)] font-medium'
-            : '!text-[var(--ink-soft)] data-[hover=true]:!bg-[var(--paper-2)] data-[hover=true]:!text-[var(--ink)]',
-        ].join(' ')}
-        startContent={<Icon size={15} strokeWidth={2} />}
+        className={className}
       >
-        <span className="flex-1 text-left">{item.label}</span>
-        {item.badge != null && (
-          <span
-            className={[
-              'text-[10.5px] tabular-nums',
-              active ? 'text-[var(--paper)] opacity-70' : 'text-[var(--ink-faint)]',
-            ].join(' ')}
-          >
-            {fmt(item.badge)}
-          </span>
-        )}
+        {content}
       </Button>
     );
   };
@@ -99,7 +134,7 @@ export default function Sidebar() {
         <span className="font-display text-[15px] text-[var(--ink)] font-semibold">Flipper</span>
       </Link>
 
-      {/* Primary nav (Карта + Аналитика) */}
+      {/* Primary nav */}
       <nav className="flex-1 overflow-y-auto py-2">
         <div className="px-2 pb-1">
           {PRIMARY.map(renderItem)}
