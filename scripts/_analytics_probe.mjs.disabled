@@ -1,0 +1,27 @@
+// Quick probe: GET /analytics and report whether rows/columns/Table1 are
+// in the rendered HTML payload.
+const r = await fetch('http://localhost:3000/analytics', { redirect: 'manual' });
+const b = await r.text();
+console.log('status:', r.status, 'length:', b.length);
+const patterns = [
+  'rows\\":',
+  'columns\\":',
+  'Table1',
+  'Продано',
+  'FILTERS',
+  'docId',
+  'allTables',
+  'pg_id',
+  'price_per_m2',
+  'Нет данных',
+  'manualSort',
+];
+for (const p of patterns) {
+  const i = b.indexOf(p);
+  if (i >= 0) {
+    const ctx = b.substr(Math.max(0, i - 40), 200).replace(/[\n\r]/g, ' ');
+    console.log(p, 'at', i, '—', JSON.stringify(ctx));
+  } else {
+    console.log(p, 'NOT FOUND');
+  }
+}

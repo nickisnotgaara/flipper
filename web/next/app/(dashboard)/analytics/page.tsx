@@ -1,57 +1,111 @@
-'use client';
+// /analytics — server-rendered table view backed by Grist.
+//
+// Earlier this was an iframe embed of the Grist document. Grist 1.7.17
+// no longer renders the document body inside a cross-origin iframe
+// (WebSocket auth + SameSite cookies), so we read the data server-side
+// via Grist's SQL API and render a TanStack table here. A button in
+// the toolbar still opens the live Grist document in a new tab for
+// editing, charts, and the rest.
 
-/**
- * /analytics — Grist self-host analytics UI.
- *
- * Вместо Univer-таблиц — две вкладки с iframe Grist:
- *   1) "Данные парсинга" — FILTERS, Аванс, Аванс_Продано, Продано, Balans, Offers_Parser, Signals_Parser
- *   2) "База архивов"   — CianSold, DomclickSold, WinnersNovostroiki, WinnersVtorichka, FlatInfoHouses, HousesAll
- *
- * `?style=singlePage` = editable, no toolbar/left menu/right creator panel.
- */
-
-import { useState } from 'react';
-import { Button } from '@heroui/react';
 import {
-  ExternalLink,
-  RefreshCw,
-  BarChart3,
-  Database,
-  Activity,
-  Archive,
-} from 'lucide-react';
+  GRIST_URL,
+  listTables,
+  tableColumns,
+  tableRecords,
+} from '@/lib/grist';
+import GristTable from '@/components/admin/GristTable';
+import { Button } from '@heroui/react';
+import { BarChart3, Database, ExternalLink } from 'lucide-react';
+import Link from 'next/link';
 
-const GRIST_BASE = process.env.NEXT_PUBLIC_GRIST_URL ?? 'http://127.0.0.1:8484';
+// Force dynamic — page reads Grist via SQL API and uses searchParams.
+export const dynamic = 'force-dynamic';
 
+// === Tab config ============================================================
+// Grist's REST API returns only tableIds (Table1, Table2, ...); the human
+// view name (e.g. "Продано") is only available over the WebSocket subscribe
+// API. We list tables by their tableId and use a static display-name map
+// for the dropdown labels.
 const TABS = [
   {
     key: 'parsing',
     label: 'Данные парсинга',
-    icon: Activity,
     docId: process.env.NEXT_PUBLIC_GRIST_DOC_PARSING ?? 'mDaHoGD6yahtxaqugwr5mK',
-    // tableId: 'Table1' (Продано, 2,000 строк) — создана первой, открывается по умолчанию
+    defaultTable: 'Table1',
     badge: '2 000 строк',
+    displayNames: {
+      Table1: 'Продано',
+      Table2: 'Аванс',
+      Table3: 'Аванс_Продано',
+      Balans: 'Balans',
+      Offers_Parser: 'Offers_Parser',
+      Signals_Parser: 'Signals_Parser',
+      FILTERS: 'FILTERS',
+    } as Record<string, string>,
   },
   {
     key: 'archives',
     label: 'База архивов',
-    icon: Archive,
     docId: process.env.NEXT_PUBLIC_GRIST_DOC_ARCHIVES ?? 'kaBfATwGgUYjDa8doqMzk3',
-    // CianSold — создана первой (откроется по умолчанию; HousesAll — вторая, уже с 20K строк)
+    defaultTable: 'HousesAll',
     badge: '20 000 строк',
+    displayNames: {
+      HousesAll: 'HousesAll',
+      CianSold: 'CianSold',
+      DomclickSold: 'DomclickSold',
+      WinnersNovostroiki: 'WinnersNovostroiki',
+      WinnersVtorichka: 'WinnersVtorichka',
+      FlatInfoHouses: 'FlatInfoHouses',
+    } as Record<string, string>,
   },
 ] as const;
 
 type TabKey = (typeof TABS)[number]['key'];
+type SearchParams = { [k: string]: string | string[] | undefined };
 
-export default function AnalyticsPage() {
-  const [active, setActive] = useState<TabKey>('parsing');
-  const [reloadKey, setReloadKey] = useState(0);
+function paramStr(p: SearchParams, key: string, fallback: string): string {
+  const v = p[key];
+  if (Array.isArray(v)) return v[0] ?? fallback;
+  return typeof v === 'string' && v ? v : fallback;
+}
 
-  const current = TABS.find((t) => t.key === active) ?? TABS[0];
-  // Открываем первую таблицу документа (по умолчанию — Table1, самая заполненная)
-  const fullUrl = `${GRIST_BASE}/${current.docId}/p/1?style=singlePage&themeAppearance=light&embed=true&_=${reloadKey}`;
-  const openUrl = `${GRIST_BASE}/${current.docId}`;
+export default async function AnalyticsPage({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
+  const tabKey = paramStr(searchParams, 'tab', 'parsing') as TabKey;
+  const current = TABS.find((t) => t.key === tabKey) ?? TABS[0];
+  const tableName = paramStr(searchParams, 'table', current.defaultTable);
+
+  // Fetch available tables (for the dropdown) + the selected table's rows.
+  const allTables = await listTables(current.docId).catch(() => []);
+  // Accept either the tableId (Table1) or the display name (Продано)
+  // as ?table=…, so links from outside don't need to know the tableId.
+  const tableId =
+    allTables.find(
+      (t) =>
+        t.id === tableName ||
+        t.name === tableName ||
+        current.displayNames[t.id] === tableName,
+    )?.id ?? tableName;
+  // Fallback: if user passed a name we don't recognise, but it's a known
+  // tableId in the doc, use it as-is.
+  const safeTableId = allTables.some((t) => t.id === tableId) ? tableId : current.defaultTable;
+
+  const [columns, rows] = await Promise.all([
+    tableColumns(current.docId, safeTableId).catch(() => []),
+    tableRecords(current.docId, safeTableId, 5000).catch(() => []),
+  ]);
+
+  // Build the dropdown items (tableId + display name) in the same order
+  // the user sees in the live Grist sidebar.
+  const tableItems = allTables.map((t) => ({
+    id: t.id,
+    label: current.displayNames[t.id] ?? t.id,
+  }));
+
+  const openUrl = `${GRIST_URL}/${current.docId}/p/1?table=${safeTableId}`;
 
   return (
     <div className="flex h-screen w-screen flex-col bg-[var(--paper)]">
@@ -68,38 +122,35 @@ export default function AnalyticsPage() {
             size="sm"
             variant="flat"
             startContent={<Database className="h-3 w-3" />}
-            onPress={() => window.open(GRIST_BASE, '_blank')}
+            onPress={undefined as never}
+            as={Link as never}
+            href={`/analytics?tab=${current.key}&table=${tableId}`}
           >
-            Grist home
-          </Button>
-          <Button
-            size="sm"
-            variant="flat"
-            startContent={<RefreshCw className="h-3 w-3" />}
-            onPress={() => setReloadKey((k) => k + 1)}
-          >
-            Перезагрузить
+            Обновить
           </Button>
           <Button
             size="sm"
             variant="flat"
             color="primary"
             startContent={<ExternalLink className="h-3 w-3" />}
-            onPress={() => window.open(openUrl, '_blank')}
+            as={Link as never}
+            href={openUrl}
+            target="_blank"
+            rel="noopener noreferrer"
           >
             Открыть в Grist
           </Button>
         </div>
       </div>
+
       {/* Tabs */}
       <div className="flex items-center gap-1 border-b border-[var(--rule)] bg-[var(--paper-card)] px-4">
         {TABS.map((t) => {
-          const Icon = t.icon;
-          const isActive = t.key === active;
+          const isActive = t.key === current.key;
           return (
-            <button
+            <Link
               key={t.key}
-              onClick={() => setActive(t.key)}
+              href={`/analytics?tab=${t.key}`}
               className={[
                 'flex items-center gap-2 px-3 py-2 text-[13px] border-b-2 transition-colors',
                 isActive
@@ -107,24 +158,22 @@ export default function AnalyticsPage() {
                   : 'border-transparent text-[var(--ink-mute)] hover:text-[var(--ink)]',
               ].join(' ')}
             >
-              <Icon size={14} strokeWidth={2} />
               <span>{t.label}</span>
               <span className="text-[10.5px] text-[var(--ink-faint)] tabular-nums">
                 {t.badge}
               </span>
-            </button>
+            </Link>
           );
         })}
       </div>
-      <div className="flex-1 overflow-hidden">
-        <iframe
-          key={reloadKey + current.docId}
-          src={fullUrl}
-          title={`Grist Analytics — ${current.label}`}
-          className="h-full w-full border-0"
-          allow="clipboard-read; clipboard-write; fullscreen"
-        />
-      </div>
+
+      <GristTable
+        docId={current.docId}
+        tableId={safeTableId}
+        columns={columns}
+        rows={rows}
+        allTables={tableItems}
+      />
     </div>
   );
 }
