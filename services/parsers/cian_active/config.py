@@ -118,17 +118,17 @@ class Settings(BaseSettings):
     tg_bot_token: str = Field(default="", description="Токен Telegram бота")
     tg_chat_id: str = Field(default="", description="ID чата для отправки уведомлений")
 
-    # === Colors ===
-    sheet_highlight_color: dict = {"red": 0.71, "green": 0.84, "blue": 0.66}
-    """Зеленоватый цвет выделения строк в Google Sheets (RGB) — unique_views ≥ min_unique_views"""
-
-    sheet_deactivated_color: dict = {"red": 217 / 255, "green": 217 / 255, "blue": 217 / 255}
-    """Сероватый цвет для снятых с публикации объявлений (#D9D9D9)"""
-
-    # Имена вкладок Google Sheets (как в документе, статичные)
-    sheet_tab_avans: str = "Аванс"
-    sheet_tab_avans_sold: str = "Аванс_Продано"
-    sheet_tab_sold: str = "Продано"
+    # === Grist table IDs (внутренние имена, не display-имена!) ===
+    # Grist API принимает только tableId (например "Sold_Ads"), а не display-имя
+    # ("Снятые"). Маппинг display → id:
+    #   Снятые         = Sold_Ads       (page 24, новая чистая, source of truth)
+    #   Активные       = Active_ads     (page 22)
+    #   Архив_Продано  = Arhiv_Prodano  (page 14, бывш. Table1, 3119 rows — read-only)
+    #   Аванс          = Table2         (page 15)
+    #   Аванс_Продано  = Table3         (page 19)
+    sheet_tab_avans: str = "Table2"          # display: "Аванс"
+    sheet_tab_avans_sold: str = "Table3"      # display: "Аванс_Продано"
+    sheet_tab_sold: str = "Sold_Ads"        # display: "Снятые" (сюда пишем все снятые)
 
     model_config = SettingsConfigDict(
         env_file=os.path.join(
@@ -207,9 +207,8 @@ def validate_config() -> bool:
         True если все OK, иначе выбрасывает ValueError
     """
     try:
-        # Проверка credentials.json будет в SheetsManager.__init__()
-        # Здесь проверяем только специфичные для parser_cian настройки
-
+        # Проверка подключения к Grist ленивая — GristClient.__init__() сам бросит
+        # ValueError если GRIST_API_KEY не задан. Здесь только локальные проверки.
         logger.info("✓ Configuration validated successfully")
         return True
 

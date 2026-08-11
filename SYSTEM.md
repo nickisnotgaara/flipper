@@ -2,21 +2,26 @@
 
 ## Архитектура
 
-Система состоит из нескольких Docker-контейнеров, управляемых через `docker-compose.yml`:
+Система состоит из **нативных** (API, фронт) и **Docker** (Flippercrawl, cookie
+manager, html_to_markdown, опц. `app_postgres`) компонентов.
 
-| Сервис | Назначение | Расписание |
-|--------|-----------|------------|
-| `app_postgres` | PostgreSQL — единая БД для всех парсеров (таблицы `houses`, `active_ads`, `sold_ads`) | always-on |
-| `app_redis` | Redis для `cookie_manager` | always-on |
-| `html_to_markdown` | Go-сервис конвертации HTML → Markdown (для `cian_active`) | always-on |
-| `cookie_manager` | Микросервис управления cookies для Firecrawl (Chromium + FastAPI) | always-on |
-| `scheduler` | APScheduler: cron-подобный запуск парсеров | always-on |
-| `cian_active` | **Активные** объявления CIAN через Firecrawl + Google Sheets | 10:00, 18:00 |
-| `category_counter` | Подсчёт объявлений CIAN по категориям (вкладка `Balans`) | 09:00 |
-| `cian_sold` | **Снятые публикации** CIAN (deactivated_offers) → PostgreSQL | **вручную** |
-| `winners_sold` | Снятые публикации baza-winner.ru → PostgreSQL | **Sun 06:00** (еженедельно) |
-| `domclick_sold` | Снятые публикации domclick.ru → PostgreSQL | **Sun 07:00** (еженедельно) |
-| `flatinfo_houses` | Реестр домов flatinfo.ru → PostgreSQL | **вручную** |
+| Сервис | Назначение | Где живёт | Расписание |
+|--------|-----------|-----------|------------|
+| **PostgreSQL 18** (натив) | **Единая БД** для всех (таблицы `houses`, `active_ads`, `sold_ads`) | Windows-native, `127.0.0.1:5432` | always-on |
+| FastAPI `web/server.py` | REST API для фронта | Натив, через `_run_api.cmd` | dev only |
+| Next.js | UI карты 2gis-style | Натив, `npm run dev` | dev only |
+| `flippercrawl-api-1` | Self-hosted Firecrawl (НЕ AI extract) | Docker, `:3002` | always-on (опц. в dev) |
+| `app_postgres` (Docker) | **Устаревшая** копия БД со старыми/сырыми данными. Не использовать для dev! | Docker, `:5432` | always-on (опц.) |
+| `app_redis` | Redis для `cookie_manager` | Docker, `:6379` | always-on (опц. в dev) |
+| `html_to_markdown` | Go-сервис конвертации HTML → Markdown (для `cian_active`) | Docker, `:8090` | always-on (опц. в dev) |
+| `cookie_manager` | Микросервис управления cookies для Firecrawl (Chromium + FastAPI) | Docker, `:8000` | always-on (опц. в dev) |
+| `scheduler` | APScheduler: cron-подобный запуск парсеров | Docker, prod only | prod only |
+| `cian_active` | **Активные** объявления CIAN через Firecrawl + Grist (вместо Google Sheets) | Docker | 10:00, 18:00 |
+| `category_counter` | Подсчёт объявлений CIAN по категориям (таблица `Balans` в Grist) | Docker | 09:00 |
+| `cian_sold` | **Снятые публикации** CIAN (deactivated_offers) → PostgreSQL | Docker | **вручную** |
+| `winners_sold` | Снятые публикации baza-winner.ru → PostgreSQL | Docker | **Sun 06:00** (еженедельно) |
+| `domclick_sold` | Снятые публикации domclick.ru → PostgreSQL | Docker | **Sun 07:00** (еженедельно) |
+| `flatinfo_houses` | Реестр домов flatinfo.ru → PostgreSQL | Docker | **вручную** |
 
 Внешняя зависимость: **self-hosted Firecrawl** (отдельный docker-compose, сеть `firecrawl_backend`).
 
@@ -24,11 +29,16 @@
 
 ## Архитектура данных
 
-Все парсеры пишут в **единую PostgreSQL БД** (`app_postgres` Docker-контейнер,
-том `pgdata`) через пакет `packages/flipper_db/`. Native PostgreSQL на хосте
-**не используется** — все сервисы (api, парсеры, scheduler, pipeline_runner)
-ходят в `app_postgres:5432` (изнутри compose-сети) через единый `DATABASE_URL`
-в `.env`. Схема-миграции — через Alembic (см. раздел "Схема-миграции" ниже).
+Все парсеры и API пишут в **единую PostgreSQL БД** через пакет
+`packages/flipper_db/`. В dev это **локальный PostgreSQL 18 на 127.0.0.1:5432**
+(Windows-native, source of truth), в prod — Docker-контейнер `app_postgres`.
+Источник правды — переменная `DATABASE_URL` в `.env` (см. [DEVELOPMENT.md](DEVELOPMENT.md)
+для dev-сетапа, [DEPLOY.md](DEPLOY.md) — для prod).
+
+> ⚠️ **Docker `app_postgres` сейчас содержит старые/сырые данные** (18 171 ads
+> без привязки к домам, 187 696 houses, 82% без координат). Это данные до
+> merge/dedup/геокодирования. **Для разработки и просмотра UI используй
+> локальный PG (127.0.0.1:5432) — там актуальные 5 227 ads / 30 868 houses.**
 
 ```
 ┌─────────────────┐
@@ -71,7 +81,7 @@
 | `parsers/domclick_sold` | `domclick_sold` | `houses` + `sold_ads` |
 | `parsers/flatinfo_houses` | `flatinfo_houses` | `houses` (только дома) |
 
-`active_ads.filter_id` — связь с `cian_filters` (Google Sheets → вкладки):
+`active_ads.filter_id` — связь с таблицей `FILTERS` в Grist:
 - `1-4` = **offers** (фильтры по году постройки и ЦАО)
 - `5` = **signals** (Опека)
 - `6` = **advance** (Запрет долги / аванс)
@@ -85,6 +95,128 @@
 | `parsers/winners_sold` | + | — | + | **Sun 06:00 weekly** |
 | `parsers/domclick_sold` | + | — | + | **Sun 07:00 weekly** |
 | `parsers/flatinfo_houses` | + | — | — | **вручную** |
+
+---
+
+## Grist schema (Parcing doc, `mDaHoGD6yahtxaqugwr5mK`)
+
+Self-hosted Grist на `http://localhost:8484` — **единая UI-таблица** для аналитики
+(вместо Google Sheets, который использовался до 2026-08). Используется парсером
+`cian_active` для записи результатов и как read-only дашборд для команды.
+
+**10 таблиц (tableId → display, строк):**
+
+| tableId         | Display        | Rows   | Назначение                                       |
+|-----------------|----------------|--------|--------------------------------------------------|
+| `FILTERS`       | Фильтры        | ~10    | URL для `cian_active` (бывш. вкладка Sheets)      |
+| `Active_ads`    | Активные       | 5 227  | Текущие активные объявления                      |
+| `Sold_Ads`      | **Снятые**     | 270 387| Все снятые публикации (вместо старой «Продано»)  |
+| `Arhiv_Prodano` | Архив Продано  | 3 119  | Legacy-данные старой вкладки «Продано» (read-only) |
+| `Offers_Parser` | Парсер Офферс  | ~5k    | Текущие результаты парсера                       |
+| `Signals_Parser`| Сигналы        | ~500   | Объявления с признаком «сигнал»                  |
+| `Table2`        | Аванс          | ~1k    | Активные авансовые                               |
+| `Table3`        | Аванс_Продано  | ~400   | Снятые авансовые                                 |
+| `Balans`        | Баланс         | daily  | Дневной счётчик `category_counter`               |
+| `Houses2`       | База домов     | 30 868 | Реестр домов (lat/lng/year/...)                  |
+
+> **Важно:** Grist API принимает **только `tableId`** (внутренний, латиницей),
+> не display-имя. Display-имена (русские) — для UI. Исключение: `FILTERS` (tableId =
+> display). См. [docs/GRIST_EXPERIMENTS.md](docs/GRIST_EXPERIMENTS.md).
+
+### Таблица `Sold_Ads` (главная для аналитики снятых)
+
+> **Эволюция:** до 2026-08 была вкладка `Table1/Продано` в Google Sheets (3 119
+> строк, write-only). Теперь это `Sold_Ads` в Grist — большая чистая таблица со
+> всеми 270k+ снятыми публикациями из PG `sold_ads`.
+
+**Колонки (30 + 2 формулы):**
+- `source` (Text) — `cian_deactivated | cian_active | domclick_sold | winners_sold`
+- `cian_id` (Numeric) — `= sold_ads.external_id` (UNIQUE для upsert)
+- `url`, `house_id`, `price`, `price_per_m2`, `area`, `rooms`
+- `floor_current`, `floor_total`, `floor_info` (combined "X/Y")
+- `housing_type`, `construction_year`, `renovation`
+- `title`, `address`, `description`
+- `district`, `okrug`, `metro_station`, `metro_walk_time`
+- `publish_date` (Date), `sold_date` (Date), `exposition_days`
+- `total_views`, `unique_views`, `parsed_at`
+- `status` (Text) — `deactivated` всегда; для UI conditional formatting
+- **`photos_url`** (Formula) → `http://localhost:3000/map?photoAd={cian_id}`
+- **`map_url`** (Formula) → `http://localhost:3000/map?house={house_id}`
+
+**Заполняется тремя путями:**
+1. **Парсер `cian_active`** (online) — при `is_active=False` пишет в `Sold_Ads` через
+   `GristClient.upsert_dict()`. Также обновляет `Offers_Parser` со status=`deactivated`.
+2. **`scripts/sync_sold_to_grist.py`** (batch) — `sold_ads` (PG) → `Sold_Ads` (Grist).
+   POST `/api/docs/{id}/tables/{t}/records` батчами по 1000, ~415 rows/s.
+3. **`parsers/cian_sold` / `parsers/domclick_sold`** — добавляют новые строки в
+   `sold_ads` (PG), затем sync-script переносит в Grist.
+
+> **Skip-existing** в sync-script проверяет `existing_cian_ids` из Grist (один
+> раз в начале), чтобы повторный запуск не дублировал. Truncate `title ≤ 300`,
+> `address ≤ 300`, `description ≤ 2000` чтобы не получать `413 Request entity too
+> large` от Grist.
+
+### Таблица `Arhiv_Prodano` (legacy read-only)
+
+Это бывшая `Table1` (вкладка «Продано» в Google Sheets). Содержит 3 119 строк
+исторических данных, написанных до Grist-миграции. **Read-only** — парсер туда
+больше не пишет, новые снятые идут в `Sold_Ads`. Если в UI нужно посмотреть
+историю — открывайте `Arhiv_Prodano` параллельно с `Sold_Ads`.
+
+### Таблица `Balans` (ежедневный счётчик)
+
+Пишется `services/category_counter` ежедневно. 8 колонок (A-H):
+- `A`: дата MSK (DateTime:UTC)
+- `B-E`: вторичка Мск, первичка Мск, первичка МО, вторичка МО (Numeric)
+- `F`: Всего = B+C+D+E (записывается Python'ом, не формулой)
+- `G`: точка равновесия (default 150 000)
+- `H`: резерв
+
+**Dedup:** `category_counter` перед записью проверяет, есть ли уже строка за
+сегодня (Grist SQL: `now() - 36h`), чтобы не плодить дубликаты при повторных запусках.
+
+### Status-колонка и условное форматирование
+
+Колонка `status` (Text) есть в `Sold_Ads`, `Offers_Parser`, `Signals_Parser`,
+`Table2` (Аванс), `Table3` (Аванс_Продано). Значения:
+
+| Значение       | Когда ставится                          | UI цвет (Grist)  |
+|----------------|-----------------------------------------|------------------|
+| `active`       | Парсер нашёл активное, `views_per_day ≤ 200` | без цвета (default) |
+| `hot`          | Активное с `views_per_day > 200`        | зелёный          |
+| `signal`       | Сработал `signal_reason` (падение цены)  | жёлтый           |
+| `deactivated`  | `is_active=False` при парсинге           | серый            |
+| `deposited`    | Аванс/задаток внесён (режим avans)      | оранжевый        |
+
+Conditional formatting настраивается **в Grist UI** (sidebar → column → Rules) —
+не код. Парсер только пишет значение.
+
+### Grist API контракт (важно)
+
+- `GET /api/docs/{docId}/sql?q=<query>` — SELECT, возвращает `[{id, fields: {...}}]`
+- `POST /api/docs/{docId}/apply` — body = **raw JSON-массив** action-ов
+- `POST /api/docs/{docId}/tables/{tableId}/records` — body = `{"records": [{"fields": {...}}]}` (быстрее чем `/apply` с per-row `AddRecord`)
+- `AddRecord` namedtuple: `(table_id, row_id, columns_dict)`, `row_id=None` для новых
+- `BulkAddRecord` namedtuple: 4 поля, не всегда работает стабильно — предпочитаем `/records`
+- Retry на 429/500/502/503/504 (до 5 раз с exponential backoff)
+- Throttle через `GRIST_READ_SPACING_SEC` (default 0.05s)
+
+### Синхронизация PG → Grist (batch)
+
+| Скрипт                          | Источник (PG)   | Цель (Grist)  | Когда запускать            |
+|---------------------------------|-----------------|---------------|----------------------------|
+| `scripts/sync_sold_to_grist.py` | `sold_ads`      | `Sold_Ads`    | раз в сутки, после парсера |
+| `scripts/sync_active_to_grist.py`| `active_ads`    | `Active_ads`  | раз в сутки, после парсера |
+| `services/category_counter`     | Cian HTML       | `Balans`      | раз в сутки (09:00 MSK)    |
+| `parsers/cian_active`           | flippercrawl    | `Offers_Parser / Signals_Parser / Sold_Ads` | каждые 6-12ч (10:00, 18:00 MSK) |
+
+`sync_sold_to_grist.py` поддерживает:
+- `--source cian_deactivated|cian_sold|domclick_sold|winners_sold` — фильтр
+- `--limit N` — первые N строк (для теста)
+- `--batch N` — размер пачки (default 2000, рекомендую 1000 для прод)
+- `--dry-run` — только показать план без записи
+- Skip-existing по `cian_id` — повторный запуск безопасен
+
 
 ---
 
@@ -107,9 +239,9 @@ docker compose run --rm cian_active --mode avans
 
 ```
 Step 1: Валидация конфигурации (.env)
-Step 2: Инициализация (SQLite, Google Sheets, Firecrawl)
+Step 2: Инициализация (SQLite, Grist, Firecrawl)
 Step 3: Получение поисковых URL
-         offers  → из вкладки FILTERS (Google Sheets)
+         offers  → из таблицы FILTERS (Grist)
          avans   → статичный URL из config
 Step 4: Извлечение ссылок объявлений из поисковых страниц
          (cianparser + ротация прокси из data/proxies.txt)
@@ -135,26 +267,31 @@ Step 6: Итоговый отчёт
 1. Парсим объявление → `ParsedAdData`
 2. AI определяет `has_avans_deposit` (внесён ли аванс/задаток)
 3. **Если AI нашла аванс**:
-  - Если AI определила аванс/задаток и `days_in_exposition ≤ 7` → записать в **«Аванс_Продано»**, удалить строку из **«Аванс»** и удалить из БД (перестать отслеживать)
+  - Если AI определила аванс/задаток и `days_in_exposition ≤ 7` → записать в **`Table3` (Аванс_Продано)** со status=`deposited`, удалить строку из **`Table2` (Аванс)** и удалить из БД
 4. **Если снято с публикации** (`is_active = False`):
-   - Удалить из **«Аванс»** + из БД
-   - «Продано» фиксируется только для `mode=offers` и только если `days_in_exposition ≤ 7`
+   - Удалить из **`Table2` (Аванс)** + из БД
+   - Запись в `Sold_Ads` (status=`deactivated`) только для `mode=offers`
 5. **Иначе** (активное, аванс не внесён):
-   - Записать/обновить в **«Аванс»** (без цвета), обновить БД
+   - Записать/обновить в **`Table2` (Аванс)** со status=`active`, обновить БД
    - Объявление будет спарсено повторно при следующем запуске
 
 #### Режим `offers`
 
 1. Парсим объявление → `ParsedAdData`
 2. Вычисляем `signal_reason` (снижение цены ≥ 5% или ≥ 3 снижений за 30 дней)
-3. **Если снято с публикации** (`is_active = False`):
+3. Вычисляем `views_per_day = unique_views / days_in_exposition`
+4. **Если снято с публикации** (`is_active = False`):
    - Удаляем из `active_ads` в БД → больше не парсим
    - Описание → «Объявление снято с публикации»
-   - Если `days_in_exposition ≤ 7` → записываем во вкладку **«Продано»**
-4. **Если активно**:
-   - Если `unique_views ≥ 200` → **Offers_Parser** + Telegram-уведомление
-   - Если сработал `signal_reason` → **Signals_Parser** + Telegram-уведомление
-   - Если критерий больше не выполняется → строка удаляется из соответствующей вкладки
+   - Если `days_in_exposition ≤ 7` → записываем в **`Sold_Ads`** со status=`deactivated` + удаляем/обновляем `Offers_Parser`
+5. **Если активно**:
+   - `views_per_day > 200` → `Offers_Parser` со status=`hot` + Telegram-уведомление
+   - Сработал `signal_reason` → `Offers_Parser` + `Signals_Parser` со status=`signal` + Telegram
+   - Иначе → `Offers_Parser` со status=`active`
+   - Если критерий больше не выполняется → строка удаляется из соответствующей таблицы
+
+> **С 2026-08-11 парсер пишет в `Sold_Ads` (Grist)** вместо legacy `Table1` (бывш.
+> «Продано»). Запись через `GristClient.upsert_dict()` — атомарный upsert по `cian_id`.
 
 ---
 
@@ -180,13 +317,19 @@ Step 6: Итоговый отчёт
 
 | Время | Задача |
 |---|---|
-| 09:00 | `category_counter` |
+| 09:00 | `category_counter` (Grist `Balans`) |
 | 10:00 | `cian_active --mode avans`, затем `--mode offers` |
 | 18:00 | `cian_active --mode avans`, затем `--mode offers` |
+| 19:00 | `scripts/sync_active_to_grist.py` (Grist `Active_ads`) |
+| 19:30 | `scripts/sync_sold_to_grist.py` (Grist `Sold_Ads`) |
 | **Sun 06:00** | `winners_sold` (еженедельно) |
 | **Sun 07:00** | `domclick_sold` (еженедельно) |
 
 Остальные парсеры (`cian_sold`, `flatinfo_houses`) — **только вручную** через `docker compose run --rm <service>`.
+
+> **Sync-скрипты** запускаются **после** парсера `cian_active`, чтобы подтянуть
+> свежие deactivated в `Sold_Ads`. Skip-existing защищает от дублей при
+> повторных запусках.
 
 Scheduler автоматически:
 - Запускает контейнеры через `docker compose run --rm` (тот же сценарий, что и при ручном запуске по SSH)
@@ -204,7 +347,7 @@ Scheduler автоматически:
 services/parsers/
 ├── _common.py                       # общий код (setup_logging, run_subprocess, safe_*)
 │
-├── cian_active/                     # активные CIAN (Firecrawl + Google Sheets)
+├── cian_active/                     # активные CIAN (Firecrawl + Grist)
 │   ├── main.py                      # оркестратор
 │   ├── config.py                    # Pydantic Settings (.env)
 │   ├── importer.py                  # импорт из data/parser_cian.db → active_ads (filter_id 1-6)
@@ -318,25 +461,25 @@ from packages.flipper_db import (
 | `sold_ads` | Снятые/проданные объявления (от всех источников) |
 | `geo_cache` | Кэш геокодирования (для будущей карты) |
 
-### Текущее состояние (после полной миграции данных)
+### Текущее состояние (локальная БД, dev)
 
-- **houses**: 181,454
-  - `cian_sold`: 28,242
-  - `domclick_sold`: 2,000
-  - `flatinfo_houses`: 41,489
-  - `winners_sold`: 109,723
-- **active_ads**: 3,393 (все `cian_active`)
-  - `filter_id=1` (offers: до 2000г не-ЦАО): 1,451
-  - `filter_id=2` (offers: после 2000г не-ЦАО): 1,287
-  - `filter_id=3` (offers: до 2000г ЦАО): 468
-  - `filter_id=4` (offers: после 2000г ЦАО): 160
-  - `filter_id=5` (signals: Опека): 18
-  - `filter_id=6` (advance: Запрет долги): 9
-- **sold_ads**: 343,044
-  - `cian_active`: 2
-  - `cian_sold`: 231,319
-  - `domclick_sold`: 2,000
-  - `winners_sold`: 109,723
+Актуальные цифры в **локальной PostgreSQL** (127.0.0.1:5432, `flipper`):
+
+- **houses**: 30 868
+  - `cian_ad`: 759
+  - `cian_sold`: 1 149
+  - `domclick_sold`: 578
+  - `flatinfo_houses`: 28 382
+- **active_ads**: 5 227 (все `cian_active`, 92.6% с `house_id`)
+  - `filter_id=1-4` (offers): ~5 200
+  - `filter_id=5` (signals: Опека): <50
+  - `filter_id=6` (advance: Запрет долги): <50
+- **sold_ads**: 233 314
+  - `cian_active`: 18 375
+  - `cian_deactivated`: 231 316
+  - `domclick_sold`: 1 998
+
+> Цифры меняются по мере reparse. Запросить свежие: `psql -h 127.0.0.1 -U flipper -d flipper -c "..."`.
 
 ### Миграция из старых источников
 

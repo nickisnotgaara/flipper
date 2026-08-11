@@ -625,6 +625,157 @@ async def cian_house_ads(cian_id: int):
     }
 
 
+def _normalize_photo_obj(p: dict, idx: int) -> dict:
+    """Свести гетерогенные форматы photos[] к одному виду.
+
+    cian (active_ads.raw_data.offer.photos[]):
+        {"id": "...", "fullUrl": "...", "thumbnail2Url": "...", ...}
+    cian_deactivated (sold_ads.raw_data.details.images[]): просто строка-URL
+    domclick (sold_ads.raw_data.photo_urls[]): просто строка-URL,
+        иногда относительная (/vitrina/...jpg) — склеиваем с img.dmclk.ru
+    """
+    if isinstance(p, str):
+        url = p
+        if url and not url.startswith("http"):
+            url = f"https://img.dmclk.ru{url}"
+        return {
+            "id": f"url_{idx}",
+            "fullUrl": url,
+            "thumbnail2Url": url,
+            "thumbnailUrl": url,
+            "miniUrl": url,
+        }
+    if not isinstance(p, dict):
+        return None
+    return {
+        "id": str(p.get("id") or f"photo_{idx}"),
+        "fullUrl": p.get("fullUrl") or p.get("thumbnail2Url") or p.get("thumbnailUrl") or p.get("miniUrl"),
+        "thumbnail2Url": p.get("thumbnail2Url") or p.get("fullUrl"),
+        "thumbnailUrl": p.get("thumbnailUrl") or p.get("fullUrl"),
+        "miniUrl": p.get("miniUrl") or p.get("thumbnailUrl") or p.get("fullUrl"),
+    }
+
+
+def _extract_photos_from_raw(raw_data) -> list[dict]:
+    """Источник-агностик: достаём список фото из raw_data.
+
+    Возвращает список нормализованных photo-объектов. Пустой список, если
+    ничего не нашли (или raw_data = None).
+    """
+    if not raw_data or not isinstance(raw_data, dict):
+        return []
+    out: list[dict] = []
+    # cian: raw_data.offer.photos[] — массив объектов с fullUrl
+    offer_photos = (raw_data.get("offer") or {}).get("photos")
+    if isinstance(offer_photos, list) and offer_photos:
+        for i, p in enumerate(offer_photos):
+            norm = _normalize_photo_obj(p, i)
+            if norm and norm.get("fullUrl"):
+                out.append(norm)
+        if out:
+            return out
+    # cian_deactivated (legacy): raw_data.details.images[] — массив СТРОК
+    detail_images = (raw_data.get("details") or {}).get("images")
+    if isinstance(detail_images, list) and detail_images:
+        for i, u in enumerate(detail_images):
+            norm = _normalize_photo_obj(u, i)
+            if norm and norm.get("fullUrl"):
+                out.append(norm)
+        if out:
+            return out
+    # domclick (наш parser): raw_data.photo_urls[] — массив строк
+    photo_urls = raw_data.get("photo_urls")
+    if isinstance(photo_urls, list) and photo_urls:
+        for i, u in enumerate(photo_urls):
+            norm = _normalize_photo_obj(u, i)
+            if norm and norm.get("fullUrl"):
+                out.append(norm)
+        if out:
+            return out
+    # domclick SSR: originalProduct.photos[] — массив {url: ...}
+    op_photos = (raw_data.get("originalProduct") or {}).get("photos")
+    if isinstance(op_photos, list) and op_photos:
+        for i, p in enumerate(op_photos):
+            url = p.get("url") if isinstance(p, dict) else p
+            norm = _normalize_photo_obj(url, i)
+            if norm and norm.get("fullUrl"):
+                out.append(norm)
+        if out:
+            return out
+    # cian_deactivated (single): previewPhoto одной строкой
+    preview = raw_data.get("previewPhoto")
+    if isinstance(preview, str) and preview:
+        norm = _normalize_photo_obj(preview, 0)
+        if norm and norm.get("fullUrl"):
+            out.append(norm)
+    return out
+
+
+@app.get("/api/ads/{external_id}/photos")
+async def ad_photos(external_id: str, source: Optional[str] = Query(None)):
+    """Вернуть список фоток объявления по его external_id.
+
+    Полезно для UI-кнопки "Показать фото" рядом с объявлением — не тащим
+    весь тяжёлый raw_data (вся страница cian), только структурированный
+    список URL'ов.
+
+    Ищем сначала в active_ads (если source не указан или = source=...),
+    потом fallback в sold_ads. Поддерживает cian, domclick, cian_deactivated.
+
+    Returns:
+        {
+            "external_id": str,
+            "source": "active_ads" | "sold_ads" | None,
+            "count": int,
+            "photos": [
+                {"id": str, "fullUrl": str, "thumbnail2Url": str, ...},
+                ...
+            ]
+        }
+    """
+    sf = get_session_factory()
+    async with sf() as s:
+        # 1) Сначала ищем в active_ads (если source не указан ИЛИ source=active)
+        if source is None or source == "active_ads" or source == "cian_active":
+            res = await s.execute(
+                text("""SELECT source, raw_data FROM active_ads
+                         WHERE external_id = :eid LIMIT 1"""),
+                {"eid": external_id},
+            )
+            row = res.first()
+            if row and row.raw_data:
+                photos = _extract_photos_from_raw(row.raw_data)
+                if photos:
+                    return {
+                        "external_id": external_id,
+                        "source": "active_ads",
+                        "ad_source": row.source,
+                        "count": len(photos),
+                        "photos": photos,
+                    }
+
+        # 2) Fallback в sold_ads
+        res = await s.execute(
+            text("""SELECT source, raw_data FROM sold_ads
+                     WHERE external_id = :eid LIMIT 1"""),
+            {"eid": external_id},
+        )
+        row = res.first()
+        if row and row.raw_data:
+            photos = _extract_photos_from_raw(row.raw_data)
+            if photos:
+                return {
+                    "external_id": external_id,
+                    "source": "sold_ads",
+                    "ad_source": row.source,
+                    "count": len(photos),
+                    "photos": photos,
+                }
+
+    # 3) Ничего не нашли
+    raise HTTPException(404, f"no photos for ad {external_id}")
+
+
 @app.get("/api/dashboard/parsed/{cian_id}")
 async def dashboard_parsed(cian_id: int):
     """Dashboard: full parsed data для дома (отдельная таблица, не карта).

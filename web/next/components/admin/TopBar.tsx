@@ -10,13 +10,6 @@ import { fetchStats, type Stats } from '@/lib/api';
 const ROUTE_LABELS: Record<string, string> = {
   '/dashboard': 'Дашборд',
   '/map': 'Карта',
-  '/tables/active': 'Активные',
-  '/tables/sold': 'Снято',
-  '/tables/hidden': 'Скрытые',
-  '/tables/houses': 'Дома',
-  '/filters': 'Сохранённые фильтры',
-  '/pipeline': 'Pipeline',
-  '/settings': 'Настройки',
 };
 
 function normalize(pathname: string): string {
@@ -28,9 +21,6 @@ function getCrumbs(pathname: string): { label: string; href: string }[] {
   const crumbs: { label: string; href: string }[] = [
     { label: 'Flipper', href: '/dashboard' },
   ];
-  if (p.startsWith('/tables')) {
-    crumbs.push({ label: 'Таблицы', href: '/tables/active' });
-  }
   const last = ROUTE_LABELS[p] || p;
   crumbs.push({ label: last, href: p });
   return crumbs;

@@ -7,8 +7,8 @@ import asyncio
 import sys
 sys.path.insert(0, ".")
 
-from services.parser_cian.config import settings
-from services.parser_cian.db.base import init_engine, AsyncSessionLocal
+from services.parsers.cian_active.config import settings
+from services.parsers.cian_active.acquirer.legacy_db.base import init_engine, AsyncSessionLocal
 from sqlalchemy import text
 
 

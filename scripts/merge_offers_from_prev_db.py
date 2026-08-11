@@ -6,7 +6,7 @@
 - filter_id переносится по URL фильтра (id в разных файлах не совпадают).
 - URL, уже присутствующие в cian_sold_ads целевой БД, не добавляются.
 - Вставленные строки: is_parsed=0, parsed_data=NULL — чтобы прогнать парсер
-  с --skip-links --unparsed-only и обновить Sheets.
+  с --skip-links --unparsed-only и обновить Grist.
 
 Запуск из корня репозитория:
   python scripts/merge_offers_from_prev_db.py
@@ -124,7 +124,7 @@ def main() -> None:
             "парсинг всё равно возможен."
         )
     print(
-        "Дальше: python -m services.parser_cian.main --mode offers --skip-links --unparsed-only"
+        "Дальше: python -m services.parsers.cian_active.main --mode offers --skip-links --unparsed-only"
     )
 
     prev.close()

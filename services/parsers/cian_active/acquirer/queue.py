@@ -2,7 +2,7 @@
 services.parsers.cian_active.acquirer.queue - Asynchronous queue management
 
 Manages async URL queue for parsing with concurrency limits.
-Worker: parse URL -> update DB -> write to Sheets tabs with color coding.
+Worker: parse URL -> update DB -> write to Grist tables.
 """
 
 import asyncio
@@ -191,30 +191,51 @@ def _is_avans_deposit(parsed: ParsedAdData) -> bool:
 # ---------------------------------------------------------------------------
 
 class QueueManager:
-    DEACTIVATED_COLOR = settings.sheet_deactivated_color
-    HIGHLIGHT_COLOR = settings.sheet_highlight_color
+    """Парсер-оркестратор: воркеры парсят URL-ы → пишут в БД и в Grist.
+
+    Settings.sheet_tab_* теперь указывают на имена Grist-таблиц.
+    """
 
     def __init__(
         self,
         parser: AdParser,
-        sheets_manager,
+        grist_client,
         db_repo: DatabaseRepository,
         concurrency: int = 2,
         mode: str = "offers",
     ):
         self.parser = parser
-        self.sheets_manager = sheets_manager
+        self.grist = grist_client
         self.db_repo = db_repo
         self.concurrency = concurrency
         self.mode = mode
         self.queue: asyncio.Queue = asyncio.Queue()
         self.processed_count = 0
         self.error_count = 0
-        self._sheets_lock = asyncio.Lock()
+        self._write_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
     # Worker
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _views_per_day(parsed) -> Optional[float]:
+        """unique_views / days_in_exposition, None если данных недостаточно.
+
+        Используется для определения status="hot" (>200 уник.просмотров/день →
+        зелёный в условном форматировании Grist).
+        """
+        uv = parsed.unique_views
+        days = parsed.days_in_exposition
+        if uv is None or days is None:
+            return None
+        try:
+            days_int = int(days)
+            if days_int <= 0:
+                return None
+            return float(uv) / days_int
+        except (TypeError, ValueError):
+            return None
 
     async def worker(self, worker_id: int) -> None:
         global _cookie_alert_sent
@@ -250,6 +271,10 @@ class QueueManager:
         signal_reason = check_signals(parsed_dict.get("price_history", []))
         signals_match = bool(signal_reason)
         row = parse_to_sheets_row(parsed_data, reason=signal_reason)
+        # status: hot (>200 unique_views/day), active, или signal.
+        # Для снятых — выставляется отдельно в _handle_offers при записи в Снятые (Sold_Ads).
+        views_per_day = self._views_per_day(parsed_data)
+        status_active = "hot" if views_per_day and views_per_day > 200 else "active"
         loop = asyncio.get_event_loop()
 
         sold_tab = (
@@ -269,7 +294,7 @@ class QueueManager:
             logger.info("[Worker-%s] OK: %s (ID: %s)", worker_id, url, parsed_data.cian_id)
             self.processed_count += 1
         else:
-            logger.error("[Worker-%s] Sheets write failed: %s", worker_id, url)
+            logger.error("[Worker-%s] Grist write failed: %s", worker_id, url)
             self.error_count += 1
 
     # ------------------------------------------------------------------
@@ -337,38 +362,62 @@ class QueueManager:
 
         if parsed_data.is_active is False:
             await self.db_repo.move_to_sold(url, parsed_dict, publish_date)
-            async with self._sheets_lock:
-                await loop.run_in_executor(None, lambda: self.sheets_manager.delete_row_by_id(
-                    settings.sheet_tab_avans, id_value=parsed_data.cian_id, id_column_index=20,
-                ))
-            logger.info("[Worker-%s] Deactivated -> removed from Avans + DB: %s", worker_id, url)
+            # Снятое аванс-объявление — пишем в Аванс_Продано (status=deactivated),
+            # удаляем из Аванс.
+            sold_dict = self.grist._row_to_dict(row)
+            sold_dict["status"] = "deactivated"
+            async with self._write_lock:
+                await loop.run_in_executor(
+                    None,
+                    lambda: self.grist.upsert_dict(
+                        settings.sheet_tab_avans_sold, sold_dict, parsed_data.cian_id
+                    ),
+                )
+                await loop.run_in_executor(
+                    None,
+                    lambda: self.grist.delete_by_cian_id(
+                        settings.sheet_tab_avans, parsed_data.cian_id
+                    ),
+                )
+            logger.info("[Worker-%s] Deactivated -> Avans_Prodano + removed from Avans: %s", worker_id, url)
             return True
 
         if has_avans:
             await self.db_repo.move_to_sold(url, parsed_dict, publish_date)
             if within_week:
-                async with self._sheets_lock:
-                    await loop.run_in_executor(None, lambda: self.sheets_manager.find_and_update_row(
-                        settings.sheet_tab_avans_sold, row,
-                        id_value=parsed_data.cian_id, id_column_index=20,
-                    ))
+                sold_dict = self.grist._row_to_dict(row)
+                sold_dict["status"] = "deposited"
+                async with self._write_lock:
+                    await loop.run_in_executor(
+                        None,
+                        lambda: self.grist.upsert_dict(
+                            settings.sheet_tab_avans_sold, sold_dict, parsed_data.cian_id
+                        ),
+                    )
                 asyncio.create_task(send_telegram_notification(
                     _build_tg_message(parsed_data, "Аванс внесён", f"Дней в каталоге: {parsed_data.days_in_exposition or '?'}")
                 ))
-            async with self._sheets_lock:
-                await loop.run_in_executor(None, lambda: self.sheets_manager.delete_row_by_id(
-                    settings.sheet_tab_avans, id_value=parsed_data.cian_id, id_column_index=20,
-                ))
+            async with self._write_lock:
+                await loop.run_in_executor(
+                    None,
+                    lambda: self.grist.delete_by_cian_id(
+                        settings.sheet_tab_avans, parsed_data.cian_id
+                    ),
+                )
             logger.info("[Worker-%s] Avans deposit -> Avans_Prodano + removed from Avans: %s", worker_id, url)
             return True
 
-        # Active, no deposit — keep tracking
+        # Active, no deposit — keep tracking (status=active)
         await self.db_repo.update_active_ad(url, parsed_dict)
-        async with self._sheets_lock:
-            ok = await loop.run_in_executor(None, lambda: self.sheets_manager.find_and_update_row(
-                settings.sheet_tab_avans, row,
-                id_value=parsed_data.cian_id, id_column_index=20,
-            ))
+        active_dict = self.grist._row_to_dict(row)
+        active_dict["status"] = "active"
+        async with self._write_lock:
+            ok = await loop.run_in_executor(
+                None,
+                lambda: self.grist.upsert_dict(
+                    settings.sheet_tab_avans, active_dict, parsed_data.cian_id
+                ),
+            )
         return bool(ok)
 
     # ------------------------------------------------------------------
@@ -398,32 +447,46 @@ class QueueManager:
 
         if is_active is False:
             if within_week:
-                async with self._sheets_lock:
-                    await loop.run_in_executor(None, lambda: self.sheets_manager.find_and_update_row(
-                        sold_tab, row, id_value=parsed_data.cian_id, id_column_index=20,
-                    ))
+                # В Снятые (Sold_Ads) пишем dict с status="deactivated" (в Sheets
+                # это была серая заливка, в Grist — value-колонка для условного
+                # форматирования).
+                sold_dict = self.grist._row_to_dict(row)
+                sold_dict["status"] = "deactivated"
+                async with self._write_lock:
+                    await loop.run_in_executor(
+                        None,
+                        lambda: self.grist.upsert_dict(
+                            sold_tab, sold_dict, parsed_data.cian_id
+                        ),
+                    )
                 asyncio.create_task(send_telegram_notification(
                     _build_tg_message(parsed_data, "Продано", f"Дней в каталоге: {parsed_data.days_in_exposition or '?'}")
                 ))
 
-            async with self._sheets_lock:
-                result = await loop.run_in_executor(None, lambda: self.sheets_manager.sync_offers_and_signals(
-                    row, str(parsed_data.cian_id), 20,
-                    self.DEACTIVATED_COLOR, signals_match, self.DEACTIVATED_COLOR,
-                    True, True,
-                ))
+            async with self._write_lock:
+                result = await loop.run_in_executor(
+                    None,
+                    lambda: self.grist.sync_offers_and_signals(
+                        row, str(parsed_data.cian_id),
+                        offers_match=True, signals_match=signals_match,
+                        deactivated=True, status="deactivated",
+                    ),
+                )
             return bool(result.get("offers_ok"))
 
         # Active ad
-        highlight_ok = views_match and (parsed_data.is_active is True)
-        offers_color = self.HIGHLIGHT_COLOR if highlight_ok else None
-        signals_color = self.HIGHLIGHT_COLOR if highlight_ok else None
+        # status="hot" (>200 views/day) → зелёный в условном форматировании Grist
+        _ = views_match  # noqa: F841 — only used for legacy color selection
 
-        async with self._sheets_lock:
-            result = await loop.run_in_executor(None, lambda: self.sheets_manager.sync_offers_and_signals(
-                row, str(parsed_data.cian_id), 20,
-                offers_color, signals_match, signals_color, True,
-            ))
+        async with self._write_lock:
+            result = await loop.run_in_executor(
+                None,
+                lambda: self.grist.sync_offers_and_signals_with_status(
+                    row, str(parsed_data.cian_id),
+                    status=status_active,
+                    signals_match=signals_match, deactivated=False,
+                ),
+            )
 
         if result.get("signal_added"):
             asyncio.create_task(send_telegram_notification(

@@ -2,7 +2,7 @@
 services.parsers.cian_active.main - Entry point orchestrator
 
 Оркестратор для сервиса парсинга Cian.
-Управляет полным циклом: чтение URLs -> PostgreSQL -> парсинг -> сохранение в БД и Sheets.
+Управляет полным циклом: чтение URLs -> PostgreSQL -> парсинг -> сохранение в БД и Grist.
 """
 
 import asyncio
@@ -10,7 +10,7 @@ import logging
 import sys
 
 # Общие пакеты
-from packages.flipper_core.sheets import SheetsManager
+from packages.flipper_core.grist import GristClient
 from packages.flipper_core.utils import log_section
 
 # Локальные модули сервиса
@@ -98,9 +98,9 @@ async def main(args):
             cleared = await db_repo.clear_sold_ads()
             logger.info(f"--reset-sold: очищено {cleared} записей из cian_sold_ads")
 
-        logger.info("Initializing Google Sheets Manager...")
-        sheets_manager = SheetsManager()
-        logger.info("✓ Sheets Manager initialized")
+        logger.info("Initializing Grist client...")
+        grist = GristClient()
+        logger.info("✓ Grist client initialized")
 
         source = args.mode  # "offers" или "avans"
 
@@ -115,10 +115,8 @@ async def main(args):
             log_section(f"Step 3: Setup Search URLs ({args.mode} mode)")
 
             if args.mode == "offers":
-                logger.info("Reading search URLs from 'FILTERS' tab...")
-                filters_table = sheets_manager.get_filters_table(
-                    tab_name="FILTERS", max_columns="ZZ"
-                )
+                logger.info("Reading search URLs from Grist 'FILTERS' table...")
+                filters_table = grist.get_filters_table("FILTERS")
                 filter_rows = filters_table.get("rows") or []
                 search_urls = [str(r.get("url") or "").strip() for r in filter_rows]
                 search_urls = [u for u in search_urls if u]
@@ -209,7 +207,7 @@ async def main(args):
             logger.warning("--unparsed-links: флаг работает только с --mode offers, игнорирую")
         if getattr(args, "unparsed_links", False) and args.mode == "offers":
             log_section("Signals_Parser → merge в БД (source=offers)")
-            signals_tab_urls = sheets_manager.get_urls(tab_name="Signals_Parser", column="A")
+            signals_tab_urls = grist.get_urls("Signals_Parser")
             signals_tab_urls = list(
                 dict.fromkeys([str(u).strip() for u in signals_tab_urls if str(u).strip()])
             )
@@ -246,7 +244,7 @@ async def main(args):
         logger.info(f"Initializing Queue Manager (concurrency={settings.parser_concurrency}, mode={args.mode})...")
         queue_manager = QueueManager(
             parser=parser,
-            sheets_manager=sheets_manager,
+            grist_client=grist,
             db_repo=db_repo,
             concurrency=settings.parser_concurrency,
             mode=args.mode,

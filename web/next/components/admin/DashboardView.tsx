@@ -20,7 +20,6 @@ import {
   Flame,
   Clock,
   Map as MapIcon,
-  Table2,
   BarChart3,
   Activity,
   type LucideIcon,
@@ -57,9 +56,14 @@ const HOT_HOUSES = [
 
 const QUICK = [
   { label: 'Карта', sub: 'Все маркеры, drill-down', icon: MapIcon, cls: 'bg-rose-50 text-rose-600', href: '/map' },
-  { label: 'Активные', sub: '5 227 объявлений', icon: Table2, cls: 'bg-emerald-50 text-emerald-700', href: '/tables/active' },
-  { label: 'Парсинг (Grist)', sub: 'Полный доступ к таблицам', icon: BarChart3, cls: 'bg-indigo-50 text-indigo-700', href: 'http://localhost:8484/mDaHoGD6yahtxaqugwr5mK/p/1', external: true },
-  { label: 'Pipeline', sub: 'Парсеры, статус', icon: Activity, cls: 'bg-amber-50 text-amber-700', href: '/pipeline' },
+  {
+    label: 'Таблицы',
+    sub: 'FILTERS, Offers, Balans и др.',
+    icon: BarChart3,
+    cls: 'bg-indigo-50 text-indigo-700',
+    href: 'http://localhost:8484/mDaHoGD6yahtxaqugwr5mK/p/14',
+    external: true,
+  },
 ];
 
 function formatNum(n: number): string {

@@ -1,23 +1,33 @@
 # Flipper
 
 Единая система парсинга недвижимости с 5 источниками. Все парсеры
-работают в одном docker-compose, пишут в общую PostgreSQL БД, подходят
-для будущей интерактивной карты 2gis-style.
+работают в одном docker-compose, пишут в общую PostgreSQL БД и **Grist**
+(для аналитики/UI), подходят для интерактивной карты 2gis-style.
+
+**Текущее состояние (dev):** API + фронт подняты нативно, БД — **локальный
+PostgreSQL 18 на 127.0.0.1:5432**. В ней 5 227 active_ads, 30 868 houses,
+247 638 sold_ads (уникальных cian_id), 270 387 строк в Grist `Sold_Ads`.
+Подробности — [DEVELOPMENT.md](DEVELOPMENT.md) и [CHANGELOG.md](CHANGELOG.md).
 
 ## Что внутри
 
-5 парсеров:
+5 парсеров + 2 batch-скрипта синхронизации PG → Grist:
 
-| Сервис | Что парсит | Расписание |
+| Сервис / Скрипт | Что делает | Расписание |
 |---|---|---|
-| `cian_active` | Активные объявления CIAN (через Firecrawl + Google Sheets) | 10:00, 18:00 |
-| `cian_sold` | Снятые публикации CIAN (deactivated_offers) | **вручную** |
-| `winners_sold` | Снятые публикации baza-winner.ru | **Sun 06:00** (еженедельно) |
-| `domclick_sold` | Снятые публикации domclick.ru | **Sun 07:00** (еженедельно) |
-| `flatinfo_houses` | Реестр домов flatinfo.ru | **вручную** |
+| `cian_active` | Активные CIAN через Firecrawl → Grist `Offers_Parser`/`Signals_Parser`/`Sold_Ads` | 10:00, 18:00 |
+| `cian_sold` | Снятые CIAN (deactivated_offers) → PG `sold_ads` | **вручную** |
+| `winners_sold` | baza-winner.ru → PG `sold_ads` | **Sun 06:00** |
+| `domclick_sold` | domclick.ru → PG `sold_ads` | **Sun 07:00** |
+| `flatinfo_houses` | flatinfo.ru → PG `houses` | **вручную** |
+| `scripts/sync_active_to_grist.py` | PG `active_ads` → Grist `Active_ads` | 19:00 |
+| `scripts/sync_sold_to_grist.py` | PG `sold_ads` → Grist `Sold_Ads` (270k+) | 19:30 |
+| `category_counter` | Подсчёт по категориям → Grist `Balans` | 09:00 |
 
 Все парсеры пишут в единую PostgreSQL БД (`houses`, `active_ads`, `sold_ads`)
-через пакет `packages/flipper_db/`.
+через пакет `packages/flipper_db/`. Grist используется как **read-only дашборд**
+для аналитики (через iframe в Next.js) + как write-таблица для парсера
+`cian_active` и batch-sync-скриптов.
 
 ## Структура
 
@@ -26,116 +36,136 @@ flipper/
 ├── services/
 │   ├── parsers/                      # 5 парсеров
 │   │   ├── _common.py                # общий код
-│   │   ├── cian_active/              # активные CIAN
+│   │   ├── cian_active/              # активные CIAN (Firecrawl + Grist)
 │   │   ├── cian_sold/                # снятые CIAN
 │   │   ├── winners_sold/             # baza-winner.ru
 │   │   ├── domclick_sold/            # domclick.ru
 │   │   └── flatinfo_houses/          # flatinfo.ru
-│   ├── category_counter/             # подсчёт объявлений по категориям
+│   ├── api/                          # FastAPI backend (web/server.py)
+│   ├── category_counter/             # подсчёт объявлений → Grist Balans
 │   ├── cookie_manager/               # Chromium + FastAPI для Firecrawl
 │   ├── html_to_markdown/             # Go-сервис HTML → Markdown
 │   └── scheduler/                    # APScheduler (cron-подобный)
 │
 ├── packages/
-│   ├── flipper_core/                 # sheets, utils, proxy_loader, html_to_md
+│   ├── flipper_core/                 # grist, utils, proxy_loader, html_to_md
 │   ├── flipper_db/                   # ⭐ SQLAlchemy: houses, active_ads, sold_ads
 │   └── go-html-to-md/                # Go-сервис
 │
-├── data/                             # proxies.txt, logs/
-├── scripts/                          # миграция, утилиты
-├── archive/                          # ⭐ scorer (в архиве, см. README внутри)
+├── scripts/                          # утилиты (включая sync_*_to_grist.py)
+├── web/
+│   ├── server.py                     # FastAPI бэкенд
+│   └── next/                         # Next.js 14 фронтенд (UI карты)
 │
-├── docker-compose.yml                # ⭐ 11 сервисов в одном compose
+├── data/                             # proxies.txt, logs/
+├── _tmp_archive/                     # ⭐ legacy-код (sheets.py, parser_cian/)
+│
+├── docker-compose.yml                # инфра (Flippercrawl, cookie_manager, app_postgres)
+├── docker-compose.override.yml       # dev override (app_postgres на 5434)
 ├── .env.example                      # шаблон переменных окружения
-├── SYSTEM.md                         # детальная документация
+├── _run_api.cmd                      # ⭐ запуск API нативно на Windows
+├── _run_front.cmd                    # запуск Next.js dev
+├── CHANGELOG.md                      # ⭐ история изменений
+├── SYSTEM.md                         # детальная архитектура
+├── DEVELOPMENT.md                    # ⭐ запуск dev-окружения
 ├── DEPLOY.md                         # развёртывание на сервере
-├── PLAN.md                           # история решений по реструктуризации
+├── AGENTS.md                         # правила для AI-агентов
 └── README.md                         # этот файл
 ```
 
-## Быстрый старт
+## Быстрый старт (dev)
+
+**Предпосылка:** локальный PostgreSQL 18 уже установлен, БД `flipper` создана
+с пользователем `flipper`/`flipper_secret` и заполнена актуальными данными
+(5 227 active_ads, 30 868 houses).
 
 ### 1. Подготовка
 
 ```bash
 # Скопировать и заполнить .env
 cp .env.example .env
-nano .env  # заполнить FIRECRAWL_API_KEY, SPREADSHEET_ID, TG_BOT_TOKEN и т.д.
+notepad .env  # проверить GRIST_API_KEY, GRIST_BASE, TG_BOT_TOKEN, TG_CHAT_ID
+              # DATABASE_URL должен указывать на 127.0.0.1:5432
 
-# Установить credentials Google
-cp /path/to/credentials.json .
-
-# Создать прокси-файл (если нужен)
-echo "host:port:user:password" > data/proxies.txt
+# Убедиться, что PostgreSQL запущен
+Get-Service postgresql-x64-18   # Status: Running
 ```
 
-### 2. Запуск инфраструктуры
+### Grist (для парсера cian_active + аналитики)
 
-```bash
-docker compose up -d              # app_postgres, app_redis, html_to_markdown,
-                                # cookie_manager, scheduler
+Self-hosted Grist поднят на `http://localhost:8484`. Doc `Parcing`
+(`mDaHoGD6yahtxaqugwr5mK`) с 10 таблицами (см. [SYSTEM.md](SYSTEM.md) → Grist
+schema). Парсер `cian_active` пишет в `Offers_Parser / Signals_Parser /
+Sold_Ads` напрямую, batch-скрипты — `Active_ads / Sold_Ads` из PG.
+
+### 2. Запуск API
+
+```powershell
+# В корне flipper/
+.\\_run_api.cmd
+# Лог в _tmp_api.log. Слушает http://127.0.0.1:8001.
 ```
 
-### 3. Первый запуск парсера вручную
+Проверка: `curl http://localhost:8001/api/stats` — JSON с houses/active_ads.
+
+### 3. Запуск фронта
 
 ```bash
-docker compose run --rm cian_active --mode offers
-docker compose run --rm cian_sold
-docker compose run --rm winners_sold
-docker compose run --rm domclick_sold
-docker compose run --rm flatinfo_houses
+cd web/next
+npm install        # один раз
+npm run dev        # http://localhost:3000
 ```
 
-### 4. Просмотр логов
+### 4. (Опц.) Поднять Docker-инфру для парсеров
 
 ```bash
-docker compose logs -f scheduler
-docker compose logs cian_active
-docker compose logs winners_sold
+# Только если собираемся запускать парсеры
+cd ../flippercrawl && docker compose up -d && cd ../flipper
+docker compose up -d app_redis html_to_markdown cookie_manager
+```
+
+**Парсеры в dev обычно не запускаем** — данные уже актуальные.
+
+### 5. Просмотр логов
+
+```bash
+# API: _tmp_api.log в корне flipper/
+# Docker: docker compose logs <service>
 ```
 
 ## Тестирование
 
 ```bash
 # Все тесты (pytest.ini настроен на все testpaths)
-PYTHONPATH=. pytest -v
+py -m pytest -v
 
 # Или локально (без docker):
-cd /opt/flipper
-PYTHONPATH=. pytest packages/flipper_db/tests services/parsers scripts/tests -v
+cd C:\Users\User\Desktop\flipping\flipper
+py -m pytest packages/flipper_db/tests services/parsers scripts/tests -v
 ```
 
-Покрытие: **118 тестов** в 9 группах:
-- `packages/flipper_db/tests/` — модели + repository (14)
-- `services/parsers/tests/test_common.py` — общий код парсеров (9)
-- `services/parsers/cian_active/tests/test_acquirer.py` — AdParser: Firecrawl, captcha, retry, URL fallback, cian_id='null'→URL (15)
-- `services/parsers/cian_active/tests/test_importer.py` — маппинг ActiveAd + filter_id (6)
-- `services/parsers/cian_sold/{acquirer,tests}/` — маппинг JSON → БД + acquirer-юниты (24)
-- `services/parsers/winners_sold/tests/` — маппинг JSON → БД (11)
-- `services/parsers/domclick_sold/tests/` — маппинг JSON → БД (11)
-- `services/parsers/flatinfo_houses/tests/` — legacy + real format (16)
-- `scripts/tests/` — миграция secondary + cian_active (12)
-
-Все парсеры следуют единому шаблону:
-- `main.py` — оркестратор (acquire → load → export)
-- `acquirer.py` (или `acquirer/` для сложных) — данные из источника
-- `importer.py` — JSON → `House/ActiveAd/SoldAd` через `packages/flipper_db`
-- `exporter.py` (опц.) — JSON → .xlsx
-- `tests/` — pytest
+Покрытие: **118+ тестов** в 9 группах. Тесты используют SQLite in-memory
+(не трогают PostgreSQL).
 
 ## Конфигурация (.env)
 
 Основные переменные (полный список в `.env.example`):
 
 ```env
+# БД — локальный PostgreSQL на 127.0.0.1:5432
+DATABASE_URL=postgresql+asyncpg://flipper:flipper_secret@127.0.0.1:5432/flipper
+POSTGRES_PASSWORD=flipper_secret
+
+# Flippercrawl (НЕ firecrawl AI extract)
 FIRECRAWL_API_KEY=local
 FIRECRAWL_BASE_URL=http://flippercrawl-api-1:3002
 
-SPREADSHEET_ID=your-spreadsheet-id
-CREDENTIALS_PATH=/app/credentials.json
+# Grist (заменил Google Sheets для cian_active)
+GRIST_API_KEY=flipper_prod_xxxxxxxxxxxx
+GRIST_BASE=http://localhost:8484
+GRIST_DOC=mDaHoGD6yahtxaqugwr5mK
 
-POSTGRES_PASSWORD=flipper_secret
-
+# Telegram (уведомления)
 TG_BOT_TOKEN=your-telegram-bot-token
 TG_CHAT_ID=your-telegram-chat-id
 
@@ -145,57 +175,14 @@ WEEKLY_WINNERS_HOUR=6
 WEEKLY_DOMCLICK_HOUR=7
 ```
 
-## Миграция существующих данных (один раз)
-
-### 1. Из `secondary/` (JSON/JSONL от старых парсеров)
-
-```bash
-docker compose up -d app_postgres
-docker compose run --rm cian_sold \
-    python -m scripts.migrate_secondary_files_to_postgres \
-        --secondary ../secondary \
-        --db "postgresql+asyncpg://flipper:${POSTGRES_PASSWORD:-flipper_secret}@app_postgres:5432/flipper"
-```
-
-Что зальётся:
-- `houses`: cian_sold 28k + domclick_sold 2k + flatinfo_houses 41k + winners_sold 110k
-- `sold_ads`: cian_sold 231k + domclick_sold 2k + winners_sold 110k
-
-### 2. Из старой `data/parser_cian.db` (SQLite с cian_active + offers/signals/advance)
-
-```bash
-docker compose run --rm cian_active \
-    python -m scripts.migrate_cian_active_db \
-        --source /app/data/parser_cian.db \
-        --db "postgresql+asyncpg://flipper:${POSTGRES_PASSWORD:-flipper_secret}@app_postgres:5432/flipper"
-```
-
-Что зальётся:
-- `active_ads`: cian_active 3,393 (filter_id 1-4 = offers, 5 = signals/Опека, 6 = advance/Запрет долги)
-- `sold_ads`: cian_active 2
-
-### 3. Проверить
-
-```bash
-docker compose exec app_postgres psql -U flipper -c "
-  SELECT source, COUNT(*) FROM houses GROUP BY source;
-  SELECT source, COUNT(*) FROM active_ads GROUP BY source;
-  SELECT source, COUNT(*) FROM sold_ads GROUP BY source;
-"
-```
-
-После успешной миграции можно удалить `secondary/` и `data/parser_cian.db`.
+> ⚠️ **DATABASE_URL в dev указывает на локальный PG (127.0.0.1)**, не на
+> `app_postgres:5432`. Для prod (Docker-compose) — наоборот. См. [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Документация
 
+- **[DEVELOPMENT.md](DEVELOPMENT.md)** — ⭐ запуск dev-окружения, troubleshooting
 - [SYSTEM.md](SYSTEM.md) — детальная архитектура, таблицы, расписание
 - [DEPLOY.md](DEPLOY.md) — развёртывание на VPS
 - [PLAN.md](../PLAN.md) — история решений по реструктуризации
+- [AGENTS.md](AGENTS.md) — правила для AI-агентов, работающих с проектом
 - [archive/scorer/README.md](archive/scorer/README.md) — как восстановить скоринг
-
-## Roadmap (за пределами этого этапа)
-
-- 🌐 REST API (FastAPI) для UI
-- 🗺️ Интерактивная карта 2gis-style (Leaflet/Mapbox)
-- 📊 Своя веб-таблица вместо Google Sheets
-- 🔄 Alembic для миграций схемы БД

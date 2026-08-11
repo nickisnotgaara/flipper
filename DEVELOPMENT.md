@@ -1,7 +1,14 @@
 # Запуск проекта (dev mode)
 
 Полное руководство для запуска Flipper в режиме разработки на Windows.
-Режим dev = Docker-инфраструктура + нативный API/фронт с hot-reload.
+Режим dev = **нативный PostgreSQL** + нативный API/фронт + Docker для
+вспомогательных сервисов (Flippercrawl, cookie manager, html_to_markdown).
+
+> **TL;DR (для себя):**
+> 1. Локальный PostgreSQL на `127.0.0.1:5432` уже поднят, база `flipper` создана,
+>    в ней лежат актуальные данные (5227 active_ads, 30 868 houses).
+> 2. `.env` указывает на `127.0.0.1:5432` — **не** на `app_postgres:5432`.
+> 3. Запуск API и фронта — нативно, без Docker, через `_run_api.cmd` + `npm run dev`.
 
 ---
 
@@ -9,29 +16,94 @@
 
 | Инструмент | Версия | Зачем | Где взять |
 |---|---|---|---|
-| Docker Desktop | latest | Все инфра-сервисы (PG, redis, cookie, **flippercrawl**) | https://www.docker.com/products/docker-desktop/ |
-| Python | 3.11+ | API/парсеры/тесты локально | https://www.python.org/downloads/ |
-| Node.js | 18+ | Next.js фронтенд | https://nodejs.org/ |
+| **PostgreSQL 18** | 18+ | **Локальная БД проекта (source of truth)** | https://www.postgresql.org/download/windows/ |
+| **Python** | 3.11+ | API/парсеры/тесты локально | https://www.python.org/downloads/ |
+| **Node.js** | 18+ | Next.js фронтенд | https://nodejs.org/ |
+| Docker Desktop | latest | Только для Flippercrawl + cookie manager + html_to_markdown (опц.) | https://www.docker.com/products/docker-desktop/ |
 | PostgreSQL client (опц.) | 16+ | `psql` для ad-hoc запросов к БД | https://www.postgresql.org/download/ |
 
 Проверка:
 ```bash
-docker --version          # Docker version 24+
-py --version              # Python 3.11+
-node --version            # v18+
+psql --version           # PostgreSQL 18+
+py --version             # Python 3.11+
+node --version           # v18+
+docker --version         # Docker version 24+ (опц., только для Flippercrawl)
 ```
 
 ---
 
-## 1. Структура .env
+## 1. База данных
 
-`.env` (в корне `flipper/`) — единственный источник истины для всех сервисов.
-Главное правило: **все сервисы ходят в `app_postgres`** (Docker-контейнер), не
-в нативный PostgreSQL на хосте.
+**В dev-режиме БД = локальный PostgreSQL на `127.0.0.1:5432`**, а не Docker-контейнер.
+Это решение принято осознанно: миграция + reparse писали напрямую в Windows-native
+PostgreSQL 18, и теперь Docker-`app_postgres` с старыми/сырыми данными не синхронизирован.
+
+### Что в БД (актуальные цифры)
+
+- **active_ads**: 5 227 (все `cian_active`), 92.6% с `house_id`
+- **houses**: 30 868, 96.3% с координатами, 99.4% с непустым адресом
+- **sold_ads**: 233 314 (cian_deactivated/domclick_sold/cian_active)
+- **Источники домов**: `cian_ad` 759, `cian_sold` 1 149, `domclick_sold` 578, `flatinfo` 28 382
+
+### Структура
+
+Один пользователь `flipper`, одна база `flipper`, пароль `flipper_secret`.
+В `.env`:
+```env
+DATABASE_URL=postgresql+asyncpg://flipper:flipper_secret@127.0.0.1:5432/flipper
+POSTGRES_PASSWORD=flipper_secret
+```
+
+### Проверка подключения
+
+```bash
+# psql напрямую
+psql -h 127.0.0.1 -U flipper -d flipper -c "SELECT COUNT(*) FROM active_ads;"
+# → 5227
+
+# через Python
+py -3.11 -c "
+import asyncio, asyncpg
+async def m():
+    c = await asyncpg.connect('postgresql://flipper:flipper_secret@127.0.0.1:5432/flipper')
+    print('houses:', await c.fetchval('SELECT COUNT(*) FROM houses'))
+    await c.close()
+asyncio.run(m())
+"
+```
+
+### Если порт 5432 занят / БД не поднята
+
+```bash
+# Проверить, что PostgreSQL-сервис запущен (Windows)
+Get-Service postgresql-x64-18
+# Если Stopped:
+Start-Service postgresql-x64-18
+
+# Если хочется пересоздать базу (ОСТОРОЖНО — стирает все данные):
+psql -h 127.0.0.1 -U postgres -c "DROP DATABASE flipper;"
+psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE flipper OWNER flipper;"
+# Затем заново прогнать миграции (см. секцию 8).
+```
+
+### Почему НЕ Docker `app_postgres`
+
+`app_postgres` (Docker) содержит **старые/сырые данные**: 18 171 active_ads без
+привязки к домам (97% unlinked), 187 696 houses, из которых 82% без координат.
+Это данные, которые парсеры записали до merge/dedup/геокодирования. **Использовать
+для отладки и просмотра можно, для разработки — нельзя.** Если когда-нибудь
+захочется снести — `docker compose down -v` (удалит том `pgdata`).
+
+---
+
+## 1.1. Структура .env
+
+`.env` (в корне `flipper/`) — единый источник истины. **DATABASE_URL смотрит
+на локальный PG** (см. секцию 1).
 
 ```env
-# БД — единая для всех сервисов (api, парсеры, scheduler, pipeline)
-DATABASE_URL=postgresql+asyncpg://flipper:flipper_secret@app_postgres:5432/flipper
+# БД — локальный PostgreSQL на 127.0.0.1:5432
+DATABASE_URL=postgresql+asyncpg://flipper:flipper_secret@127.0.0.1:5432/flipper
 POSTGRES_PASSWORD=flipper_secret
 
 # Flippercrawl — наш кастомный парсер cian, **НЕ firecrawl AI extract**.
@@ -40,11 +112,14 @@ POSTGRES_PASSWORD=flipper_secret
 FIRECRAWL_API_KEY=local
 FIRECRAWL_BASE_URL=http://flippercrawl-api-1:3002
 
-# Google Sheets (для cian_active)
-SPREADSHEET_ID=your-spreadsheet-id
-CREDENTIALS_PATH=/app/credentials.json
+# Grist (self-hosted UI-таблица для cian_active + аналитика)
+# Заменил Google Sheets в 2026-08 — поддержка batch apply, нет OAuth-геморроя,
+# читаемые формулы в UI. Doc `Parcing` с 10 таблицами (см. SYSTEM.md → Grist).
+GRIST_API_KEY=flipper_prod_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+GRIST_BASE=http://localhost:8484
+GRIST_DOC=mDaHoGD6yahtxaqugwr5mK
 
-# Telegram (уведомления)
+# Telegram (уведомления о сигналах/авансах)
 TG_BOT_TOKEN=your-telegram-bot-token
 TG_CHAT_ID=your-telegram-chat-id
 
@@ -55,8 +130,11 @@ CORS_ORIGINS=*
 Полный список переменных — в `.env.example`. Скопировать и заполнить:
 ```bash
 cp .env.example .env
-# отредактировать: SPREADSHEET_ID, TG_BOT_TOKEN, TG_CHAT_ID
+# отредактировать: GRIST_API_KEY, TG_BOT_TOKEN, TG_CHAT_ID
 ```
+
+> **Grist обязателен для парсера `cian_active` и batch-скриптов sync.** Без
+> `GRIST_API_KEY` в `.env` парсер упадёт при первом write в `Offers_Parser`.
 
 Для фронтенда — отдельный `.env.local` в `web/next/`:
 ```bash
@@ -71,96 +149,51 @@ NEXT_PUBLIC_API_BASE=http://localhost:8001
 | Порт | Сервис | Проект | Доступ |
 |---|---|---|---|
 | **3000** | Next.js dev | flipper (натив) | http://localhost:3000 |
-| **3002** | **Flippercrawl** (НЕ firecrawl) | flippercrawl (Docker) | http://localhost:3002 |
-| **5432** | PostgreSQL | flipper (Docker `app_postgres`) | localhost:5432 |
-| **6379** | Redis | flipper (Docker `app_redis`) | localhost:6379 |
-| **8000** | Cookie Manager | flipper (Docker) | http://localhost:8000 |
-| **8001** | FastAPI API | flipper (Docker `api-dev`) | http://localhost:8001 |
-| **8090** | HTML → Markdown | flipper (Docker) | http://localhost:8090 |
+| **3002** | **Flippercrawl** (НЕ firecrawl) | flippercrawl (Docker, опц.) | http://localhost:3002 |
+| **5432** | **PostgreSQL (локальный)** | flipper (натив) | localhost:5432 |
+| **6379** | Redis | flipper (Docker, опц.) | localhost:6379 |
+| **8000** | Cookie Manager | flipper (Docker, опц.) | http://localhost:8000 |
+| **8001** | FastAPI API | flipper (**натив**, через `_run_api.cmd`) | http://localhost:8001 |
+| **8090** | HTML → Markdown | flipper (Docker, опц.) | http://localhost:8090 |
 
-Конфликты портов: если порт занят — измените в `docker-compose.yml` (левая часть `8001:8000`).
+Минимальный набор для запуска фронта+API+работы с данными: **5432 (PG), 3000 (front), 8001 (API)**.
+Остальное — нужно только если запускаем парсеры.
 
 ---
 
 ## 3. Запуск (пошагово)
 
-### 3.1. Запустить Docker Desktop
+### 3.1. Убедиться, что PostgreSQL запущен
 
 ```bash
-# Windows: запустить Docker Desktop через Start Menu, или:
-powershell.exe -Command "Start-Process 'C:\Program Files\Docker\Docker\Docker Desktop.exe'"
-# подождать ~30-60 сек пока daemon поднимется
-docker ps   # проверка — должен вывести заголовок таблицы без ошибок
+Get-Service postgresql-x64-18   # Status: Running
+psql -h 127.0.0.1 -U flipper -d flipper -c "SELECT 1;"   # OK
 ```
 
-### 3.2. Поднять инфраструктуру (Docker)
+### 3.2. Запустить API (нативно, hot-reload)
 
-В корне `flipper/`:
+API запускается **нативно** через `_run_api.cmd` (в корне `flipper/`).
+Скрипт подгружает `.env` в окружение и стартует `uvicorn` с `--reload`.
 
-```bash
-# Поднимает: app_postgres, app_redis, html_to_markdown, cookie_manager
-docker compose up -d app_postgres app_redis html_to_markdown cookie_manager
+```powershell
+# Из PowerShell в корне flipper/
+.\\_run_api.cmd
+# Лог пишется в _tmp_api.log. После старта:
+#   INFO:     Uvicorn running on http://127.0.0.1:8001
 ```
 
-Проверить что все healthy:
+Проверка:
 ```bash
-docker compose ps
-# Ожидаемо:
-#   app_postgres       running (healthy)
-#   app_redis          running (healthy)
-#   html_to_markdown   running (healthy)
-#   cookie_manager     running (healthy)   # start_period 180s — подождать
-```
-
-### 3.3. Поднять Flippercrawl (отдельный docker-compose)
-
-> **ВАЖНО:** у нас **только Flippercrawl** (наш кастомный парсер), **НЕ firecrawl AI extract**.
-> Flippercrawl использует исключительно static-путь (`data.json.rawOfferData`),
-> LLM/AI fallback не подключён. Любые упоминания "firecrawl" в коде — это имя сервиса
-> и переменных окружения, а не "firecrawl AI". Подробности: `docs/PLAN_CIAN_FLIPPERCRAWL_REWRITE.md`.
-
-Flippercrawl живёт в `../flippercrawl/` — отдельный compose, общая сеть `firecrawl_backend`.
-
-```bash
-cd ../flippercrawl
-docker compose up -d
-cd ../flipper
-```
-
-Проверить:
-```bash
-curl http://localhost:3002/    # должен ответить (200 OK)
-```
-
-Если сети `firecrawl_backend` нет — Firecrawl создаст её автоматически при первом запуске.
-
-### 3.4. Поднять API (Docker, hot-reload)
-
-API живёт в Docker (`api-dev` профиль) с volume-монтированием исходников —
-правки в `web/server.py` подхватываются uvicorn `--reload` мгновенно.
-
-```bash
-docker compose --profile dev up -d --build api-dev
-```
-
-Проверить:
-```bash
-docker logs flipper_api_dev --tail 10
-# должно: "Uvicorn running on http://0.0.0.0:8000"
-#         "Application startup complete."
-
 curl http://localhost:8001/api/stats
-# JSON с houses: 187696, active_total: 3393, ...
+# {"houses":30868,"active_total":5227,"active_linked":4842,...}
 ```
 
-> **Почему api в Docker, а не нативно?** API импортирует `packages/flipper_db`
-> который тянет `sqlalchemy[asyncio]`, `asyncpg`, `numpy`, `scipy`. Проще держать
-> всё в Docker-образе, чем ставить Python-зависимости на хост. Volume-mount
-> даёт hot-reload — разницы с нативным `uvicorn --reload` нет.
+> **Почему нативно, а не Docker?** Так быстрее, и не нужно возиться со сборкой
+> образа. `uvicorn --reload` ловит правки в `web/`, `packages/`, `services/`.
+> Зависимости (`fastapi`, `asyncpg`, `numpy`, `scipy`) уже стоят в системном
+> Python 3.11 на этой машине.
 
-### 3.5. Поднять фронтенд (нативно, hot-reload)
-
-Next.js запускается нативно (быстрее, чем в Docker, и правки мгновенны):
+### 3.3. Запустить фронтенд (нативно, hot-reload)
 
 ```bash
 cd web/next
@@ -176,44 +209,55 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:3000
 
 Открыть в браузере: **http://localhost:3000** — карта должна работать.
 
-### 3.6. Проверить данные в БД (опц.)
+### 3.4. (Опц.) Запустить Flippercrawl + cookie manager
+
+Эти сервисы нужны только для парсеров (`cian_active` и т.д.). Для разработки
+фронта/правок API они не нужны.
 
 ```bash
-# Сколько домов / объявлений
-docker exec app_postgres psql -U flipper -d flipper -c "
+# Flippercrawl
+cd ../flippercrawl
+docker compose up -d
+cd ../flipper
+
+# Cookie manager + html_to_markdown (если будете запускать парсеры)
+docker compose up -d app_redis html_to_markdown cookie_manager
+```
+
+### 3.5. Проверить данные в БД (опц.)
+
+```bash
+psql -h 127.0.0.1 -U flipper -d flipper -c "
   SELECT 'houses' AS t, COUNT(*) FROM houses
   UNION ALL SELECT 'active_ads', COUNT(*) FROM active_ads
   UNION ALL SELECT 'sold_ads', COUNT(*) FROM sold_ads;
 "
 
 # По источникам
-docker exec app_postgres psql -U flipper -d flipper -c "
+psql -h 127.0.0.1 -U flipper -d flipper -c "
   SELECT source, COUNT(*) FROM houses GROUP BY source ORDER BY source;
-  SELECT source, COUNT(*) FROM sold_ads GROUP BY source ORDER BY source;
 "
 ```
 
-Ожидаемо (после полной миграции):
-- `houses`: ~187k (cian_sold 34k, domclick 2k, flatinfo 41k, winners 110k)
-- `active_ads`: ~3.4k (cian_active)
-- `sold_ads`: ~231k (cian_deactivated 231k)
+Ожидаемо:
+- `houses`: 30 868
+- `active_ads`: 5 227 (все cian_active)
+- `sold_ads`: 233 314
 
 ---
 
 ## 4. Быстрый старт (всё одной пачкой)
 
-Если всё уже настроено (`.env` заполнен, `npm install` сделан, образы собраны):
+Если PostgreSQL уже запущен и `.env` заполнен:
 
-```bash
-# 1. Docker Desktop запущен
-# 2. Поднять инфраструктуру + firecrawl + api-dev:
-cd flipper
-docker compose up -d app_postgres app_redis html_to_markdown cookie_manager
-cd ../flippercrawl && docker compose up -d && cd ../flipper
-docker compose --profile dev up -d api-dev
+```powershell
+# 1. API (в одном окне терминала)
+cd C:\Users\User\Desktop\flipping\flipper
+.\\_run_api.cmd
 
-# 3. Фронт (в отдельном терминале):
-cd web/next && npm run dev
+# 2. Фронт (в другом окне)
+cd C:\Users\User\Desktop\flipping\flipper\web\next
+npm run dev
 ```
 
 Открыть http://localhost:3000 — готово.
@@ -221,6 +265,11 @@ cd web/next && npm run dev
 ---
 
 ## 5. Ручной запуск парсеров (dev)
+
+> **Парсеры сейчас не запускаем в dev** — данные уже в локальной БД, и они
+> полные (5227 ads / 30 868 houses). Запускать парсеры имеет смысл только
+> для backfill или проверки новой логики. Если всё-таки надо — Docker
+> обязателен (Flippercrawl, cookie_manager, html_to_markdown).
 
 Парсеры запускаются как одноразовые контейнеры через compose:
 
@@ -246,13 +295,94 @@ docker compose run --rm category_counter
 docker compose run --rm pipeline_runner
 ```
 
-Логи парсера:
+> ⚠️ **Парсеры пишут в свой `app_postgres` (Docker), не в локальный PG.**
+> Если хочется писать в локальный — переопределите DATABASE_URL в `.env` для
+> парсера: `--env DATABASE_URL=postgresql+asyncpg://flipper:flipper_secret@127.0.0.1:5432/flipper`.
+
+---
+
+## 5.5. Grist: setup + sync scripts
+
+Grist — self-hosted UI-таблица (аналог Airtable). Заменил Google Sheets для
+парсера `cian_active` в 2026-08. Doc `Parcing` (`mDaHoGD6yahtxaqugwr5mK`)
+содержит 10 таблиц — полный список в [SYSTEM.md](SYSTEM.md) → Grist schema.
+
+### Запуск Grist
+
 ```bash
-docker compose logs cian_active
-# или:
-docker exec app_postgres cat /dev/null  # no-op
-tail -f data/logs/cian_active.log       # на хосте (монтировано через volume)
+# В корне flipper/ — Grist уже в docker-compose.yml
+docker compose up -d grist
+# UI: http://localhost:8484
+# API: http://localhost:8484/api/docs/{docId}/...
 ```
+
+API-ключ и docId берутся из `.env`:
+```env
+GRIST_API_KEY=flipper_prod_xxxxxxxx
+GRIST_BASE=http://localhost:8484
+GRIST_DOC=mDaHoGD6yahtxaqugwr5mK
+```
+
+### Batch-скрипты синхронизации PG → Grist
+
+После того как парсер `cian_active` (или `cian_sold` / `domclick_sold`)
+написал в PG, нужно перенести в Grist `Sold_Ads` / `Active_ads` для UI.
+Делается двумя скриптами:
+
+```bash
+# Синхронизировать ВСЕ снятые публикации из PG → Grist Sold_Ads
+# (skip-existing по cian_id, безопасно запускать повторно)
+py -3.11 scripts/sync_sold_to_grist.py
+# Примерно 12 мин на 200k строк (batch=1000, ~415 rows/s)
+
+# Только активные
+py -3.11 scripts/sync_active_to_grist.py
+# ~30 сек на 5k строк
+
+# С фильтром по source (cian_deactivated/cian_active/domclick_sold/winners_sold)
+py -3.11 scripts/sync_sold_to_grist.py --source cian_active
+
+# Тестовая выборка
+py -3.11 scripts/sync_sold_to_grist.py --limit 1000 --dry-run
+```
+
+**Параметры:**
+- `--source` — фильтр по `sold_ads.source` (для sync_sold)
+- `--limit N` — только первые N строк
+- `--batch N` — размер пачки (default 1000, рекомендую не больше 2000 из-за 413)
+- `--dry-run` — показать план без записи
+
+**Автоматизация:** в `services/scheduler` добавить 2 задачи:
+- `19:00` — `sync_active_to_grist.py`
+- `19:30` — `sync_sold_to_grist.py`
+
+Оба скрипта идемпотентны (skip по `cian_id`), повторный запуск не дублирует.
+
+### Ручная запись в Grist (для тестов)
+
+```python
+from packages.flipper_core.grist import GristClient
+
+g = GristClient()
+# Upsert по cian_id (если есть — обновит, иначе вставит)
+g.upsert_dict("Sold_Ads", {
+    "source": "cian_deactivated",
+    "url": "https://www.cian.ru/sale/flat/123456/",
+    "house_id": 381553,
+    "price": 50000000,
+    "cian_id": 123456,
+    "status": "deactivated",
+}, cian_id=123456)
+
+# SELECT через SQL (Grist принимает SQLite-синтаксис)
+records = g.sql("SELECT * FROM Sold_Ads WHERE cian_id = 123456")
+for r in records:
+    print(r["id"], r["fields"])
+```
+
+> **Grist API принимает только `tableId`** (внутреннее имя), не display. Для
+> `Sold_Ads` tableId = `Sold_Ads` (не «Снятые»). Полный маппинг в
+> [SYSTEM.md](SYSTEM.md) → Grist schema.
 
 ---
 
@@ -287,7 +417,7 @@ py -m ruff check --fix .        # авто-фикс (Optional→X|Y, unused impo
 py -m ruff format .             # форматирование
 ```
 
-Config — в `pyproject.toml` `[tool.ruff]`. Excludes: `archive/`, `services/parser_cian/`, `data/`.
+Config — в `pyproject.toml` `[tool.ruff]`. Excludes: `archive/`, `_tmp_archive/`, `data/`.
 
 ---
 
@@ -296,48 +426,45 @@ Config — в `pyproject.toml` `[tool.ruff]`. Excludes: `archive/`, `services/pa
 Alembic настроен, но **ещё не применён** к существующей БД (структура создана,
 baseline не застампован). См. `alembic/README.md` для деталей.
 
-Когда нужно применить миграцию:
+Когда нужно применить миграцию (нативно):
 ```bash
-# Внутри Docker (api-образ содержит alembic + psycopg):
-docker compose run --rm api alembic upgrade head
+cd flipper
+py -3.11 -m alembic upgrade head
 
 # Сгенерировать миграцию из изменений моделей:
-docker compose run --rm api alembic revision --autogenerate -m "add X to houses"
+py -3.11 -m alembic revision --autogenerate -m "add X to houses"
 ```
 
 One-time adoption на существующей БД:
 ```bash
-docker compose run --rm api alembic stamp head   # пометить текущую схему как baseline
+py -3.11 -m alembic stamp head   # пометить текущую схему как baseline
 ```
 
 ---
 
 ## 9. Типовые проблемы (troubleshooting)
 
-### Docker не отвечает
+### API возвращает 500 на любой запрос
+Смотри `_tmp_api.log` (если запускал через `_run_api.cmd`). Почти всегда —
+DATABASE_URL указывает не туда или хост не резолвится. Проверить:
 ```bash
-docker ps
-# error during connect... → Docker Desktop не запущен.
-# Запустить Docker Desktop, подождать 30-60 сек.
+# Из того же окружения, что и API:
+echo %DATABASE_URL%
+# Должно быть postgresql+asyncpg://flipper:flipper_secret@127.0.0.1:5432/flipper
 ```
 
-### app_postgres не healthy
-```bash
-docker compose logs app_postgres
-# Если "port 5432 already in use" — на хосте запущен нативный PostgreSQL.
-# Остановить его:  Stop-Service postgresql-x64-18  (PowerShell admin)
-# Или сменить порт в docker-compose.yml:  "5433:5432"
-```
+### `socket.gaierror: [Errno 11001] getaddrinfo failed` в логе API
+`DATABASE_URL` указывает на `app_postgres` или `host.docker.internal`, а
+контейнер не поднят. Поправить `.env` на `127.0.0.1:5432` (см. секцию 1) и
+перезапустить API.
 
-### api-dev не стартует
-```bash
-docker compose --profile dev logs api-dev
-# Частые причины:
-#   - app_postgres не healthy → дождаться
-#   - .env не заполнен (DATABASE_URL пустой)
-#   - образ не пересобран после изменения requirements.txt:
-#       docker compose --profile dev up -d --build api-dev
-```
+### API не видит .env
+`_run_api.cmd` явно подгружает `.env` через `set`. Если запускаешь uvicorn
+руками — не забудь либо подгрузить env, либо передать `DATABASE_URL=...` в env.
+
+### `relation "houses" does not exist` / похожие ошибки
+БД не инициализирована. Создать таблицы через миграции (см. секцию 8) или
+накатить бэкап.
 
 ### Фронт не подключается к API
 ```bash
@@ -347,8 +474,25 @@ cat web/next/.env.local
 
 # Проверить API:
 curl http://localhost:8001/api/stats
-# Должен вернуть JSON. Если 502 — api-dev упал, смотреть логи.
+# Должен вернуть JSON.
 ```
+
+### Порт занят
+```bash
+netstat -ano | findstr :8001      # Windows
+# Убить процесс:  Stop-Process -Id <PID> -Force
+```
+
+### Docker-`app_postgres` мешает (порт 5432)
+Если поднят `app_postgres` из docker-compose — он займёт 5432 и локальный
+PG перестанет быть доступен. Решения:
+- Остановить:  `docker compose stop app_postgres`
+- Или поднять `app_postgres` на другом порту через `docker-compose.override.yml`:
+  ```yaml
+  services:
+    app_postgres:
+      ports: ["5434:5432"]
+  ```
 
 ### Cookie Manager долго стартует (180 сек)
 Это нормально — `start_period: 180s` в compose. Cookie Manager поднимает
@@ -364,40 +508,25 @@ cd ../flippercrawl && docker compose ps
 curl http://localhost:3002/   # 200 OK
 ```
 
-### Порт занят
-```bash
-# Кто слушает порт 8001:
-netstat -ano | findstr :8001      # Windows
-# Или изменить порт в docker-compose.yml:  "8002:8000"
-```
-
-### Парсер не видит данные в БД
-Парсеры пишут в `app_postgres` (Docker). API тоже читает `app_postgres`.
-Если данные "разные" — значит кто-то ходит в нативный PG. Проверить:
-```bash
-docker compose run --rm cian_active env | grep DATABASE_URL
-# Должно быть: ...@app_postgres:5432/...
-# Если @host.docker.internal или @127.0.0.1 — это баг, поправить .env.
-```
-
 ---
 
 ## 10. Остановка
 
 ```bash
-# Остановить всё Flipper:
+# Остановить API: Ctrl+C в окне, где запущен _run_api.cmd
+# Остановить фронт: Ctrl+C в окне, где запущен npm run dev
+
+# Остановить Docker-сервисы Flippercrawl + cookie manager (если подняты):
 cd flipper
-docker compose down                    # инфра + api-dev
-# Не удаляет тома — данные БД сохраняются (pgdata volume).
+docker compose stop app_redis html_to_markdown cookie_manager
 
-# Остановить Firecrawl:
-cd ../flippercrawl && docker compose down
+cd ../flippercrawl && docker compose stop
 
-# Остановить фронт: Ctrl+C в терминале `npm run dev`
-
-# Полная очистка (ОСТОРОЖНО — удалит БД):
-# docker compose down -v               # удаляет тома (pgdata)
+# Полная очистка Docker-стека (ОСТОРОЖНО — удалит данные `app_postgres`):
+# cd flipper && docker compose down -v
 ```
+
+Локальный PostgreSQL **не останавливать** — там живут все данные проекта.
 
 ---
 
@@ -405,12 +534,12 @@ cd ../flippercrawl && docker compose down
 
 | | Dev (Windows) | Prod (Linux VPS) |
 |---|---|---|
-| Инфра | Docker | Docker |
-| API | Docker `api-dev` (uvicorn --reload, volume-mount) | Docker `api` (gunicorn, без reload) |
+| БД | **Локальный PostgreSQL 18 на 127.0.0.1:5432** | Docker `app_postgres` (внутри compose-сети) |
+| API | **Натив** через `_run_api.cmd` (uvicorn --reload) | Docker `api` (gunicorn, без reload) |
 | Фронт | Натив `npm run dev` (hot-reload) | Статика `npm run build` → Vercel/nginx |
-| БД | `app_postgres` (Docker, порт 5432 наружу) | `app_postgres` (Docker, только внутренний) |
-| Scheduler | (обычно не запускают в dev) | Docker `scheduler` (always-on) |
-| Парсеры | `docker compose run --rm <name>` | Scheduler запускает по cron |
+| Flippercrawl / cookie manager / html_to_markdown | Docker, опц. (нужны только для парсеров) | Docker, always-on |
+| Scheduler | (не запускают в dev) | Docker `scheduler` (always-on) |
+| Парсеры | (не запускают в dev) | Scheduler по cron / `docker compose run --rm <name>` |
 
 Подробнее про prod — в [DEPLOY.md](DEPLOY.md).
 
@@ -420,45 +549,29 @@ cd ../flippercrawl && docker compose down
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│  flipper/ (docker-compose.yml)                                   │
+│  Windows-хост (dev)                                              │
 │                                                                  │
-│  Инфра (always-on):                                              │
-│    app_postgres :5432   ← ЕДИНАЯ БД для всех                     │
-│    app_redis    :6379   ← для cookie_manager                     │
-│    html_to_markdown :8090                                        │
-│    cookie_manager :8000                                          │
+│  PostgreSQL 18 (натив)  127.0.0.1:5432                           │
+│  user=flipper, db=flipper  ← source of truth в dev               │
 │                                                                  │
-│  API (dev):                                                      │
-│    api-dev  :8001  ← FastAPI (uvicorn --reload, volume-mount)    │
-│                  ← web/server.py → packages/flipper_db           │
+│  uvicorn (натив)  127.0.0.1:8001                                 │
+│  web/server.py → packages/flipper_db  (--reload)                 │
 │                                                                  │
-│  Парсеры (manual, profiles: [manual]):                           │
-│    cian_active, cian_sold, winners_sold,                         │
-│    domclick_sold, flatinfo_houses, category_counter              │
+│  Next.js dev (натив)  localhost:3000                             │
+│  web/next/  → ходит в 127.0.0.1:8001                            │
 │                                                                  │
-│  Scheduler (prod-only):                                          │
-│    scheduler  ← APScheduler, запускает парсеры по cron           │
+│  Docker (опц., только для парсеров):                             │
+│    flippercrawl-api-1   :3002                                    │
+│    app_redis            :6379                                    │
+│    cookie_manager       :8000                                    │
+│    html_to_markdown     :8090                                    │
+│    app_postgres         :5432   ← старые данные, не source       │
 │                                                                  │
-└──────────────────────────────────────────────────────────────────┘
-                          ↕
-┌──────────────────────────────────────────────────────────────────┐
-│  flippercrawl/ (отдельный docker-compose, сеть firecrawl_backend)│
-│    flippercrawl-api-1 :3002   ← self-hosted Firecrawl            │
-│    flippercrawl-redis-1       ← кэш Firecrawl                    │
-│    flippercrawl-rabbitmq-1    ← очередь Firecrawl                │
-│    flippercrawl-nuq-postgres-1 ← БД Firecrawl (отдельная)         │
-└──────────────────────────────────────────────────────────────────┘
-                          ↕
-┌──────────────────────────────────────────────────────────────────┐
-│  web/next/ (нативно в dev)                                       │
-│    Next.js dev server :3000                                      │
-│    NEXT_PUBLIC_API_BASE=http://localhost:8001                    │
-│    → ходит в api-dev (Docker)                                    │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-Все сервисы ходят в **один** `app_postgres` через единый `DATABASE_URL` в `.env`.
-Native PostgreSQL на хосте **не используется**.
+В dev `DATABASE_URL` указывает на **локальный PostgreSQL 127.0.0.1:5432**.
+В prod — на `app_postgres:5432` внутри compose-сети (см. [DEPLOY.md](DEPLOY.md)).
 
 ---
 

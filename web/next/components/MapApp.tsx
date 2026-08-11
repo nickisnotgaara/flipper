@@ -374,6 +374,11 @@ export default function MapApp() {
   const flyRef = useRef<((lat: number, lng: number, z?: number) => void) | null>(null);
   const [isMobile, setIsMobile] = useState(false);
 
+  /** Внешний ID объявления из `?photoAd=…`. Когда задан и `detail` уже
+   *  загрузился — HousePanel сама откроет AdPhotosModal. Используется
+   *  ссылкой из Grist Active_ads → `photos_url`. */
+  const [autoOpenPhotoAdId, setAutoOpenPhotoAdId] = useState<string | null>(null);
+
   useEffect(() => {
     fetchStats().then(setStats).catch(() => {});
   }, []);
@@ -390,20 +395,41 @@ export default function MapApp() {
   }, []);
 
   // Auto-open house from ?house=ID query param.
+  // NB: zoom-to-house — после openCluster() мы получим HouseDetail с
+  // lat/lng и летим на координаты дома. Без этого юзер видел бы дефолтный
+  // вид Москвы и только что открытую панель — не понятно, где этот дом.
+  //
+  // Также парсим `?photoAd=EXTERNAL_ID` (deep-link из Grist Active_ads) —
+  // после загрузки дома панель сама откроет AdPhotosModal для этого
+  // объявления, без ручного клика по 📷.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
     const houseId = params.get('house');
-    if (houseId) {
-      const id = Number(houseId);
-      if (!Number.isNaN(id) && id > 0) {
-        openCluster(id);
-      } else {
-        const url = new URL(window.location.href);
-        url.searchParams.delete('house');
-        window.history.replaceState({}, '', url.toString());
-      }
+    const photoAd = params.get('photoAd');
+    if (photoAd) setAutoOpenPhotoAdId(photoAd);
+    if (!houseId) return;
+    const id = Number(houseId);
+    if (Number.isNaN(id) || id <= 0) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('house');
+      window.history.replaceState({}, '', url.toString());
+      return;
     }
+    let cancelled = false;
+    (async () => {
+      const detail = await openCluster(id);
+      if (cancelled || !detail) return;
+      const h = detail.house;
+      if (h && h.lat != null && h.lng != null) {
+        // Если дом без координат (редко) — оставляем дефолтный вид.
+        const fly = flyRef.current;
+        if (fly) {
+          fly(h.lat, h.lng, 17);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -443,7 +469,7 @@ export default function MapApp() {
     loadHouses(bounds);
   }, [bounds, loadHouses]);
 
-  const openCluster = useCallback(async (id: number) => {
+  const openCluster = useCallback(async (id: number): Promise<HouseDetail | null> => {
     setSelectedId(id);
     setLoadingDetail(true);
     setSelectedDetail(null);
@@ -455,6 +481,7 @@ export default function MapApp() {
     try {
       const d = await fetchCluster(id);
       setSelectedDetail(d);
+      return d;
     } catch (e) {
       if (typeof window !== 'undefined') {
         const url = new URL(window.location.href);
@@ -463,6 +490,7 @@ export default function MapApp() {
       }
       setSelectedId(null);
       console.error('openCluster failed', e);
+      return null;
     } finally {
       setLoadingDetail(false);
     }
@@ -478,9 +506,11 @@ export default function MapApp() {
     // disappears only when a different house is opened.
     setSelectedId(null);
     setSearchPin(null);
+    setAutoOpenPhotoAdId(null);
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
       url.searchParams.delete('house');
+      url.searchParams.delete('photoAd');
       window.history.replaceState({}, '', url.toString());
     }
   }, []);
@@ -678,6 +708,7 @@ export default function MapApp() {
         detail={selectedDetail}
         loading={loadingDetail}
         onClose={close}
+        autoOpenPhotoAdId={autoOpenPhotoAdId}
       />
 
       {/* Map help — small "?" button always present (works whether the

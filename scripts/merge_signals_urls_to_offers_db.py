@@ -3,9 +3,9 @@
 Добавляет URL объявлений в cian_active_ads (source=offers), чтобы их подхватил парсер.
 
 Обычный цикл:
-  1) (опционально) этот скрипт — merge из Google Sheets Signals_Parser или из файла
+  1) (опционально) этот скрипт — merge из Grist Signals_Parser или из файла
   2) парсер:
-     python -m services.parser_cian.main --mode offers --skip-links --unparsed-links
+     python -m services.parsers.cian_active.main --mode offers --skip-links --unparsed-links
 
 Из корня репозитория.
 """
@@ -312,20 +312,24 @@ def _read_urls_file(path: str) -> list[str]:
 
 
 async def _amain(args: argparse.Namespace) -> None:
-    from packages.flipper_core.sheets import SheetsManager
-    from services.parser_cian.config import validate_config
-    from services.parser_cian.db.repository import DatabaseRepository
+    from packages.flipper_core.grist import GristClient
+    from services.parsers.cian_active.config import validate_config
+    from services.parsers.cian_active.acquirer.legacy_db.repository import (
+        DatabaseRepository,
+    )
 
-    from services.parser_cian.config import settings
+    from services.parsers.cian_active.config import settings
     validate_config()
     db_url = args.database_url or settings.database_url
     db = DatabaseRepository(database_url=db_url)
     await db.init_db()
 
     urls: list[str] = []
-    if args.from_sheet:
-        sm = SheetsManager()
-        urls = sm.get_urls(tab_name="Signals_Parser", column="A")
+    if args.from_grist:
+        from dotenv import load_dotenv
+        load_dotenv()  # подхватить GRIST_API_KEY / GRIST_BASE / GRIST_DOC
+        grist = GristClient()
+        urls = grist.get_urls("Signals_Parser")
         urls = list(dict.fromkeys([str(u).strip() for u in urls if str(u).strip()]))
     elif args.file:
         urls = _read_urls_file(args.file)
@@ -338,16 +342,16 @@ async def _amain(args: argparse.Namespace) -> None:
 
     added = await db.merge_active_ad_urls(urls, source="offers")
     print(f"URL в списке: {len(urls)}, новых вставок в cian_active_ads: {added}")
-    print("Дальше: python -m services.parser_cian.main --mode offers --skip-links --unparsed-links")
+    print("Дальше: python -m services.parsers.cian_active.main --mode offers --skip-links --unparsed-links")
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--database-url", default="", help="PostgreSQL URL (default: from settings)")
     ap.add_argument(
-        "--from-sheet",
+        "--from-grist",
         action="store_true",
-        help="Читать URL из вкладки Signals_Parser, колонка A (нужны .env и Google credentials)",
+        help="Читать URL из Grist-таблицы Signals_Parser (нужен GRIST_API_KEY в .env)",
     )
     ap.add_argument("--file", default="", help="Файл: по одному URL на строку")
     args = ap.parse_args()

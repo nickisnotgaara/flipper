@@ -163,6 +163,24 @@ export const fetchSuggest = (text: string, bbox?: string) =>
 export const fetchGeocode = (text: string) =>
   get<GeocodeResult>('/api/geocode', { text });
 
+/** Фотки одного объявления по external_id. Источник-агностик. */
+export type AdPhotos = {
+  external_id: string;
+  source: 'active_ads' | 'sold_ads' | null;
+  ad_source: string | null;
+  count: number;
+  photos: Array<{
+    id: string;
+    fullUrl: string;
+    thumbnail2Url: string;
+    thumbnailUrl: string;
+    miniUrl: string;
+  }>;
+};
+
+export const fetchAdPhotos = (external_id: string) =>
+  get<AdPhotos>(`/api/ads/${encodeURIComponent(external_id)}/photos`);
+
 // Legacy GeoJSON helper — kept for compatibility, returns empty.
 export type GeoJsonFC = { type: 'FeatureCollection'; features: any[] };
 export const _legacyFetchGeoJson = async (): Promise<GeoJsonFC> => ({
