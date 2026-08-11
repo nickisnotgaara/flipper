@@ -85,6 +85,8 @@ scripts/_*.ps1
 data/_*.py
 data/_*.json
 data/_*.dump
+_COMMIT_EDITMSG.txt
+_COMMIT_*.txt
 
 # Archive (legacy code, переносим осознанно в Фазе 3)
 archive/
