@@ -416,25 +416,27 @@ async def cian_house_ads(cian_id: int):
     # sold_ads — снятые, для deactivated вкладки)
     async with sf() as s:
         # 1) active_ads (то что у нас сейчас активно)
-        # NB: в active_ads поле cian_id (не external_id) — алиасим как external_id для merge
+        # NB: active_ads.cian_house_id всегда NULL — линк через houses.cian_house_id
         active_rows_res = await s.execute(
-            text("""SELECT cian_id AS external_id, price, price_per_m2,
-                         area, rooms, floor_current, floor_total,
-                         days_in_exposition, publish_date, url, raw_data,
-                         is_active, metro_station
-                  FROM active_ads
-                  WHERE cian_house_id = :cid"""),
+            text("""SELECT a.external_id, a.price, a.price_per_m2,
+                         a.area, a.rooms, a.floor_current, a.floor_total,
+                         a.days_in_exposition, a.publish_date, a.url, a.raw_data,
+                         a.is_active, a.metro_station
+                  FROM active_ads a
+                  JOIN houses h ON h.id = a.house_id
+                  WHERE h.cian_house_id = :cid"""),
             {"cid": cian_id},
         )
         active_rows = active_rows_res.fetchall()
 
         # 2) dashboard_parsed_ads (full offerData из flippercrawl)
+        # NB: dashboard_parsed_ads.cian_house_id заполняется напрямую (не через houses)
         dpa_res = await s.execute(
-            text("""SELECT external_id, status, title, price, price_per_m2,
-                         area, rooms, floor_current, floor_total, exposition_days,
-                         date_start, date_end, url, raw_data, parsed_at
-                  FROM dashboard_parsed_ads
-                  WHERE cian_house_id = :cid"""),
+            text("""SELECT dpa.external_id, dpa.status, dpa.title, dpa.price, dpa.price_per_m2,
+                         dpa.area, dpa.rooms, dpa.floor_current, dpa.floor_total, dpa.exposition_days,
+                         dpa.date_start, dpa.date_end, dpa.url, dpa.raw_data, dpa.parsed_at
+                  FROM dashboard_parsed_ads dpa
+                  WHERE dpa.cian_house_id = :cid"""),
             {"cid": cian_id},
         )
         dpa_rows = dpa_res.fetchall()

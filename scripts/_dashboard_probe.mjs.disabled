@@ -1,9 +1,0 @@
-const b = await (await fetch('http://localhost:3000/dashboard')).text();
-for (const p of ['Парсинг', 'Архивы', 'Дома', 'Grist', 'Карта', 'http://localhost:8484/', 'Карта']) {
-  const i = b.indexOf(p);
-  if (i >= 0) {
-    const ctx = b.substr(Math.max(0, i - 30), 200).replace(/\n/g, ' ');
-    console.log(p, 'at', i, '—', JSON.stringify(ctx));
-  } else console.log(p, 'NOT FOUND');
-}
-console.log('--- total body length ---', b.length);
