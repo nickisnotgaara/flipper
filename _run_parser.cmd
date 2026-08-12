@@ -22,7 +22,7 @@ set GRIST_BASE=http://localhost:8484
 set GRIST_DOC=mDaHoGD6yahtxaqugwr5mK
 
 REM Telegram
-set TG_BOT_TOKEN=8663326200:AAFgTdFRQhWZV58XGnrCZKb4MFzvqSxNdV4
+set TG_BOT_TOKEN=8612305452:AAEpWGzmlAeEY0q1LyxmzjEFmKr4-uQzmCo
 set TG_CHAT_ID=6089511983
 
 REM Parser infra

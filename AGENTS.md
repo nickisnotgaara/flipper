@@ -81,11 +81,12 @@ docker compose run --rm cian_active --mode offers           # 10:00, 18:00 MSK
 docker compose run --rm domclick_sold --mode full           # Sun 07:00 MSK
 
 # Заархивированные парсеры (только вручную при необходимости):
-# cp -r _tmp_archive/parsers_manual/<name> services/parsers/
+# Только cian_sold лежит в _tmp_archive/parsers_manual/ (восстановлен из git 7dbbf4a).
+# flatinfo_houses и winners_sold — полностью удалены в 6d75153,
+#   поднять обратно: git checkout 7dbbf4a -- _tmp_archive/parsers_manual/<name>
+# cp -r _tmp_archive/parsers_manual/cian_sold services/parsers/cian_sold
 # (добавь блок в docker-compose.yml, см. _tmp_archive/parsers_manual/README.md)
-docker compose run --rm flatinfo_houses    # раз в 2-3 мес (дома)
-docker compose run --rm winners_sold       # разово (второй источник)
-docker compose run --rm cian_sold          # разово (свежие deactivated)
+# docker compose run --rm cian_sold          # разово (свежие deactivated, legacy)
 ```
 
 ## 3. Частые ошибки и как их избежать
@@ -226,10 +227,12 @@ Self-hosted Grist на `http://localhost:8484` (GRIST_BASE в `.env`). Doc
     SaaS-парсеров карточек (scrape-as-a-service) в коде или env.
     Self-hosted Flippercrawl: порт 3002, эндпоинт `/v2/cian/scrape`.
     Env vars: `FLIPPERCRAWL_API_KEY`, `FLIPPERCRAWL_BASE_URL`.
-14. **3 парсера в архиве, не в active:** `flatinfo_houses`, `winners_sold`,
-    `cian_sold` — лежат в `_tmp_archive/parsers_manual/`. Запускаются вручную
-    (см. `_tmp_archive/parsers_manual/README.md`). Не импортируй их в
-    production-код.
+14. **1 парсер в архиве, не в active:** `cian_sold` — лежит в
+    `_tmp_archive/parsers_manual/`. Запускается вручную (см.
+    `_tmp_archive/parsers_manual/README.md`). `flatinfo_houses` и
+    `winners_sold` удалены в `6d75153`; поднять обратно:
+    `git checkout 7dbbf4a -- _tmp_archive/parsers_manual/<name>`.
+    Не импортируй архивные парсеры в production-код.
 
 ### Когда менять схему Grist
 
