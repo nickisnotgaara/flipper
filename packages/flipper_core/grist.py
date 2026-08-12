@@ -279,6 +279,10 @@ class GristClient:
 
         В Grist SQL результат — список {fields: {...}}, поэтому rowId берём
         из records[0].fields.id.
+
+        NB: работает только с таблицами, где есть колонка `cian_id` —
+        Offers_Parser, Signals_Parser, Sold_Ads, Arhiv_Prodano, Table2, Table3.
+        Для Active_ads / Houses2 (external_id) — используй find_by_external_id.
         """
         try:
             cid = int(cian_id)
@@ -286,6 +290,23 @@ class GristClient:
             return None
         records = self.sql(
             f'SELECT id FROM "{table}" WHERE cian_id = {cid} LIMIT 1'
+        )
+        if records and records[0].get("fields", {}).get("id") is not None:
+            return {"id": records[0]["fields"]["id"]}
+        return None
+
+    def find_by_external_id(self, table: str, external_id: Any) -> Optional[dict]:
+        """Найти запись по external_id. Возвращает {'id': <rowId>} или None.
+
+        Для таблиц, где ключ — колонка `external_id` (Active_ads, Houses2),
+        а не `cian_id` (Offers_Parser, Sold_Ads, ...).
+        """
+        try:
+            eid = int(external_id)
+        except (ValueError, TypeError):
+            return None
+        records = self.sql(
+            f'SELECT id FROM "{table}" WHERE external_id = {eid} LIMIT 1'
         )
         if records and records[0].get("fields", {}).get("id") is not None:
             return {"id": records[0]["fields"]["id"]}
@@ -340,6 +361,15 @@ class GristClient:
     def delete_by_cian_id(self, table: str, cian_id: Any) -> bool:
         """Удалить запись по cian_id. False если не найдена."""
         existing = self.find_by_cian_id(table, cian_id)
+        if not existing:
+            return False
+        actions = [["RemoveRecord", table, existing["id"]]]
+        self.apply(actions)
+        return True
+
+    def delete_by_external_id(self, table: str, external_id: Any) -> bool:
+        """Удалить запись по external_id (Active_ads, Houses2). False если не найдена."""
+        existing = self.find_by_external_id(table, external_id)
         if not existing:
             return False
         actions = [["RemoveRecord", table, existing["id"]]]

@@ -1,11 +1,14 @@
-"""services.parsers - все парсеры проекта Flipper (5 штук).
+"""services.parsers - парсеры проекта Flipper.
 
-Структура:
-    cian_active/        — активные CIAN (через Firecrawl)
-    cian_sold/          — снятые публикации CIAN (deactivated_offers)
-    winners_sold/       — снятые baza-winner.ru
-    domclick_sold/      — снятые domclick.ru
-    flatinfo_houses/    — реестр домов flatinfo.ru
+Активные (автоматически по расписанию):
+    cian_active/        — активные CIAN (через Flippercrawl). Scheduler: ежедневно 10:00, 18:00.
+    domclick_sold/      — снятые domclick.ru. Scheduler: еженедельно Sun 07:00.
+
+Заархивированные (запускаются вручную при необходимости):
+    flatinfo_houses/    — реестр домов flatinfo.ru     → _tmp_archive/parsers_manual/
+    winners_sold/       — снятые baza-winner.ru          → _tmp_archive/parsers_manual/
+    cian_sold/          — снятые публикации CIAN         → _tmp_archive/parsers_manual/
+    См. _tmp_archive/parsers_manual/README.md для инструкции по ручному запуску.
 
 Общий код — в `services/parsers/_common.py`.
 """

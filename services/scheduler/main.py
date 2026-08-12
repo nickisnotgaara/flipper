@@ -34,8 +34,10 @@ RETRY_BACKOFF_BASE = int(os.getenv("SCHEDULER_RETRY_BACKOFF_BASE", "30"))
 
 JOB_TIMEOUT_PARSER = int(os.getenv("SCHEDULER_JOB_TIMEOUT_PARSER", str(3 * 3600)))
 JOB_TIMEOUT_COUNTER = int(os.getenv("SCHEDULER_JOB_TIMEOUT_COUNTER", str(30 * 60)))
-# Weekly: domclick_sold v2 (list 100 pages BFF + parse ~2000 cards) и winners_sold
-# могут занимать 2-4ч в первые прогоны. Дефолт 4ч с запасом.
+# Weekly: domclick_sold v2 (list 100 pages BFF + parse ~2000 cards).
+# Может занимать 2-4ч в первые прогоны. Дефолт 4ч с запасом.
+# (Раньше было +winners_sold — он заархивирован в _tmp_archive/parsers_manual/,
+# больше не запускается автоматически.)
 JOB_TIMEOUT_WEEKLY = int(os.getenv("SCHEDULER_WEEKLY_TIMEOUT", str(4 * 3600)))
 JOB_TIMEOUT_PIPELINE = int(os.getenv("SCHEDULER_PIPELINE_TIMEOUT", str(3 * 3600)))
 
@@ -483,7 +485,7 @@ async def job_weekly(service: str, label: str) -> None:
     """Generic weekly job для парсеров с еженедельным расписанием.
 
     Args:
-        service: имя docker-compose сервиса ('winners_sold' | 'domclick_sold').
+        service: имя docker-compose сервиса (сейчас только 'domclick_sold').
         label: человекочитаемая метка для логов и алертов.
     """
     job_label = f"weekly/{label}"
@@ -509,10 +511,6 @@ async def job_weekly(service: str, label: str) -> None:
         await send_alert(f"<b>Scheduler</b>\n{job_label} exception: {exc}")
     finally:
         _weekly_lock.release()
-
-
-async def job_weekly_winners() -> None:
-    await job_weekly("winners_sold", "winners_sold")
 
 
 async def job_weekly_domclick() -> None:
@@ -672,17 +670,10 @@ def build_scheduler() -> AsyncIOScheduler:
 
     # Weekly: winners + domclick (еженедельно, чтобы не толкаться с ежедневным cian_active)
     WEEKLY_DOW = os.getenv("WEEKLY_RUN_DAY_OF_WEEK", "sun")
-    WINNERS_HOUR = int(os.getenv("WEEKLY_WINNERS_HOUR", "6"))
     DOMCLICK_HOUR = int(os.getenv("WEEKLY_DOMCLICK_HOUR", "7"))
 
-    scheduler.add_job(
-        job_weekly_winners,
-        CronTrigger(day_of_week=WEEKLY_DOW, hour=WINNERS_HOUR, minute=0, timezone=MSK),
-        id="winners_sold_weekly",
-        name=f"winners_sold @ {WEEKLY_DOW.upper()} {WINNERS_HOUR:02d}:00 MSK",
-        misfire_grace_time=3600,
-        max_instances=1,
-    )
+    # Weekly domclick (вместо старого "winners + domclick" — winners заархивирован,
+    # см. _tmp_archive/parsers_manual/README.md)
     scheduler.add_job(
         job_weekly_domclick,
         CronTrigger(day_of_week=WEEKLY_DOW, hour=DOMCLICK_HOUR, minute=0, timezone=MSK),

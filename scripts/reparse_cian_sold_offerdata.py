@@ -1,8 +1,8 @@
 """scripts.reparse_cian_sold_offerdata - backfill полного offerData (с photos) в sold_ads.
 
 Назначение:
-    После migrate_server_parser_cian.py в sold_ads.raw_data лежит Firecrawl
-    AI-экстракция (без photos, без geo.coordinates). Этот скрипт перепарсит
+    После migrate_server_parser_cian.py в sold_ads.raw_data лежит
+    сжатая экстракция (без photos, без geo.coordinates). Этот скрипт перепарсит
     каждое СНЯТОЕ объявление через flippercrawl и заменит raw_data на полный
     state.offerData (с photos, lat/lng, building, agent, etc.) — чтобы в UI
     карусель показывалась и в снятых публикациях.

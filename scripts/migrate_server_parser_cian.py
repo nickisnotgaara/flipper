@@ -5,8 +5,8 @@
 
 Назначение:
     Серверная БД (где крутится ``parser_cian`` v1) часто содержит более
-    свежие данные, чем локальная. Этот скрипт переносит URL + Firecrawl
-    AI-экстракцию (parsed_data) в новую схему. Полный offerData (с photos,
+    свежие данные, чем локальная. Этот скрипт переносит URL +
+    сжатую экстракцию (parsed_data) в новую схему. Полный offerData (с photos,
     geo.coordinates) докачивается **отдельным** reparse-скриптом через
     flippercrawl → CianSource.
 
@@ -217,7 +217,7 @@ def _active_ad_from_server_row(
 ) -> Optional[ActiveAd]:
     """``cian_active_ads`` (server) → ``ActiveAd`` (local).
 
-    Серверный ``parsed_data`` — это JSON-блоб от Firecrawl AI extraction,
+    Серверный ``parsed_data`` — это сжатый JSON-блоб экстракции,
     не полный offerData. ``raw_data`` оставляем как есть (для последующего
     re-parse через flippercrawl).
     """

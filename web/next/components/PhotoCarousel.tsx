@@ -27,7 +27,7 @@ function pickThumb(p: Photo): string | null {
 
 /**
  * 2GIS-style image carousel:
- *   - 3 thumbnails visible at once, ~110x110, 4px gap, rounded 12px
+ *   - 4 thumbnails visible at once, square aspect, 4px gap, rounded 12px
  *   - Left/right circular arrow buttons overlaid on the edges
  *     (only when there is more to scroll in that direction)
  *   - Click any image → open fullUrl in a new tab
@@ -48,7 +48,7 @@ export default function PhotoCarousel({
     ? (photos.filter((p) => p && typeof p === 'object' && pickThumb(p as Photo)) as Photo[])
     : [];
 
-  // 3 thumbs visible, scroll one slide at a time. align='start' so the first
+  // 4 thumbs visible, scroll one slide at a time. align='start' so the first
   // slide sits flush against the left edge after a prev-click. `dragFree=false`
   // (the default) so snaps are clean.
   const [emblaRef, emblaApi] = useEmblaCarousel({
@@ -152,11 +152,11 @@ export default function PhotoCarousel({
             const thumb = pickThumb(p);
             return (
               <div
-                // Slide width: container width minus the small horizontal
-                // padding (-mx-1 + px-1) divided into 3 thumbs + 2 gaps of
-                // 4px each. min-w-0 keeps it from overflowing the flex math.
+                // Slide width: container width divided into 4 thumbs + 3 gaps
+                // of 4px each. min-w-0 keeps it from overflowing the flex
+                // math.
                 key={p.id ?? i}
-                className="embla-slide shrink-0 basis-[calc((100%-8px)/3)] min-w-0"
+                className="embla-slide shrink-0 basis-[calc((100%-12px)/4)] min-w-0"
               >
                 {/* Native <button>, not HeroUI Button. Reason:
                     PhotoCarousel lives inside a card-level <a href> in
@@ -215,7 +215,7 @@ export default function PhotoCarousel({
                (keyboard activation, synthetic vs native event timing).
           Without this, clicking the rightmost visible photo where
           `canNext` is true would hit the `›` button (z-10, overlapping
-          the 3rd thumbnail) and silently navigate to cian.ru. */}
+          the 4th thumbnail) and silently navigate to cian.ru. */}
       {canPrev && (
         <button
           type="button"
@@ -239,9 +239,9 @@ export default function PhotoCarousel({
         </button>
       )}
 
-      {/* Dot indicators only if there are 4+ photos (3 is the visible
+      {/* Dot indicators only if there are 5+ photos (4 is the visible
           count, so dots make sense when there's at least one hidden slide). */}
-      {scrollSnaps.length > 3 && (
+      {scrollSnaps.length > 4 && (
         <div className="absolute bottom-1 left-0 right-0 flex justify-center gap-1 pointer-events-none">
           {scrollSnaps.map((_, i) => (
             <span

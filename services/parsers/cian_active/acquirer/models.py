@@ -70,8 +70,8 @@ class PriceHistoryEntry(BaseModel):
 class ParsedAdData(BaseModel):
     """
     Распарсенные данные объявления недвижимости с Cian.
-    
-    Это сырая модель, которая выходит из парсера Firecrawl.
+
+    Это сырая модель, которая выходит из парсера Flippercrawl.
     Не должна содержать логику преобразования для Google Sheets.
     """
 
@@ -181,7 +181,7 @@ class ParsedAdData(BaseModel):
         description="Активно ли объявление. False если снято с публикации/продано.",
     )
 
-    # Аванс/задаток (режим avans; извлекает AI по схеме Firecrawl)
+    # Аванс/задаток (режим avans; извлекает AI по схеме Flippercrawl)
     has_avans_deposit: Optional[bool] = Field(
         None,
         description="На карточке есть признак внесённого аванса/задатка за объект.",

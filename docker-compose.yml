@@ -2,9 +2,16 @@
 #
 # Сервисы:
 #   Infrastructure: app_postgres, app_redis, html_to_markdown, cookie_manager
-#   Parsers (manual): cian_active, cian_sold, winners_sold, domclick_sold, flatinfo_houses
-#                     category_counter, pipeline_runner
+#   Parsers:
+#     * cian_active      — авто (ежедневно 10:00, 18:00, через scheduler)
+#     * domclick_sold    — авто (раз в неделю Sun 07:00, через scheduler)
+#     * category_counter — ручной (раз в сутки)
+#     * pipeline_runner  — ручной (ежедневно fetch-missing)
 #   Always-on:       api (FastAPI prod), scheduler (cron-подобный)
+#
+# Заархивированные парсеры (запускаются вручную при необходимости):
+#   * flatinfo_houses, winners_sold, cian_sold → _tmp_archive/parsers_manual/
+#   * Инструкция по ручному запуску: _tmp_archive/parsers_manual/README.md
 #
 # Фронтенд (Next.js) намеренно вынесен из compose.
 #   - Собирается отдельно: web/next/ → `npm run build` → статика в ./out
@@ -15,10 +22,7 @@
 # Запуск:
 #   docker compose up -d                                 # инфраструктура + scheduler + api
 #   docker compose run --rm cian_active                  # ручной запуск парсера
-#   docker compose run --rm cian_sold                    # ручной
-#   docker compose run --rm winners_sold                 # ручной
 #   docker compose run --rm domclick_sold                # ручной
-#   docker compose run --rm flatinfo_houses              # ручной
 #   docker compose run --rm pipeline_runner              # ручной запуск pipeline
 #
 # Dev-режим для API (uvicorn --reload, монтирование исходников):
@@ -135,7 +139,7 @@ services:
     environment:
       TZ: Europe/Moscow
       <<: *strip-proxy-env
-      FIRECRAWL_BASE_URL: "${PARSER_FIRECRAWL_BASE_URL:-http://host.docker.internal:3002}"
+      FLIPPERCRAWL_BASE_URL: "${PARSER_FLIPPERCRAWL_BASE_URL:-http://host.docker.internal:3002}"
     volumes:
       - ${FLIPPER_CREDENTIALS_SOURCE:-./credentials.json}:/app/credentials.json
       - ${FLIPPER_DATA_SOURCE:-./data}:/app/data
@@ -148,49 +152,7 @@ services:
         condition: service_healthy
     networks:
       - flipper_network
-      - firecrawl_backend
-    profiles:
-      - manual
-
-  cian_sold:
-    image: flipper-cian_sold
-    build:
-      context: .
-      dockerfile: ./services/parsers/cian_sold/Dockerfile
-    container_name: cian_sold
-    env_file:
-      - .env
-    environment:
-      TZ: Europe/Moscow
-      <<: *strip-proxy-env
-    volumes:
-      - ${FLIPPER_DATA_SOURCE:-./data}:/app/data
-    depends_on:
-      app_postgres:
-        condition: service_healthy
-    networks:
-      - flipper_network
-    profiles:
-      - manual
-
-  winners_sold:
-    image: flipper-winners_sold
-    build:
-      context: .
-      dockerfile: ./services/parsers/winners_sold/Dockerfile
-    container_name: winners_sold
-    env_file:
-      - .env
-    environment:
-      TZ: Europe/Moscow
-      <<: *strip-proxy-env
-    volumes:
-      - ${FLIPPER_DATA_SOURCE:-./data}:/app/data
-    depends_on:
-      app_postgres:
-        condition: service_healthy
-    networks:
-      - flipper_network
+      - flippercrawl_backend
     profiles:
       - manual
 
@@ -200,27 +162,6 @@ services:
       context: .
       dockerfile: ./services/parsers/domclick_sold/Dockerfile
     container_name: domclick_sold
-    env_file:
-      - .env
-    environment:
-      TZ: Europe/Moscow
-      <<: *strip-proxy-env
-    volumes:
-      - ${FLIPPER_DATA_SOURCE:-./data}:/app/data
-    depends_on:
-      app_postgres:
-        condition: service_healthy
-    networks:
-      - flipper_network
-    profiles:
-      - manual
-
-  flatinfo_houses:
-    image: flipper-flatinfo_houses
-    build:
-      context: .
-      dockerfile: ./services/parsers/flatinfo_houses/Dockerfile
-    container_name: flatinfo_houses
     env_file:
       - .env
     environment:
@@ -274,7 +215,7 @@ services:
       TZ: Europe/Moscow
       PYTHONPATH: /app
       <<: *strip-proxy-env
-      FIRECRAWL_BASE_URL: "${PARSER_FIRECRAWL_BASE_URL:-http://host.docker.internal:3002}"
+      FLIPPERCRAWL_BASE_URL: "${PARSER_FLIPPERCRAWL_BASE_URL:-http://host.docker.internal:3002}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -380,7 +321,7 @@ services:
 networks:
   flipper_network:
     driver: bridge
-  firecrawl_backend:
+  flippercrawl_backend:
     external: true
 
 volumes:

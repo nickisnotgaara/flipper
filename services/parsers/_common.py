@@ -44,7 +44,7 @@ def setup_logging(name: str, level: str | None = None) -> logging.Logger:
     """Стандартное логирование: stdout + rotating file.
 
     Args:
-        name: имя логгера (обычно = имя парсера, например 'winners_sold').
+        name: имя логгера (обычно = имя парсера, например 'cian_active').
         level: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' (default из LOG_LEVEL env, fallback 'INFO').
 
     Returns:
@@ -88,7 +88,7 @@ async def run_subprocess(
     прокидывается в родительский stdout/stderr (наследуется).
 
     Args:
-        args: список аргументов (например, ['-m', 'services.parsers.cian_sold.acquirer', '--output', ...]).
+        args: список аргументов (например, ['-m', 'services.parsers.domclick_sold.acquirer', '--output', ...]).
         cwd: рабочая директория (если None — текущая).
         logger: куда логировать (если None — берётся logger по имени 'subprocess').
 

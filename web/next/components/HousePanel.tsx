@@ -224,9 +224,10 @@ function PanelBody({
   autoOpenPhotoAdId: string | null;
 }) {
   const hasAds = !!(detail && (detail.active.length > 0 || detail.deactivated.length > 0));
-  // Один photo-modal на всю панель. Клик по иконке 📷 в AdCard вызывает
-  // openPhotos(ad) — модалка живёт в PanelBody, поэтому не вложена в
-  // <a> (валидность HTML) и не дублируется на каждую карточку.
+  // Один photo-modal на всю панель. Открывается из deep-link
+  // `?photoAd=…` (ссылка из Grist Active_ads → photos_url). На самой
+  // карточке отдельной кнопки-иконки больше нет — модалка открывается
+  // по клику на любой из 4 фото-превью (PhotoCarousel → onThumbClick).
   const [photosAd, setPhotosAd] = useState<Ad | null>(null);
 
   // Авто-открытие галереи, если в URL был `?photoAd=…` (deep-link из Grist).
@@ -592,7 +593,7 @@ function AdCard({ ad, kind, onOpenPhotos }: { ad: Ad; kind: 'active' | 'deactiva
         className="block"
       >
         {photos && (
-          <div className="p-2.5 pb-0 pr-[78px]">
+          <div className="p-2.5 pb-0">
             <PhotoCarousel photos={photos} adUrl={ad.url} />
           </div>
         )}
