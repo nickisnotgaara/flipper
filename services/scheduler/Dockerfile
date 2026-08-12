@@ -22,7 +22,6 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.
 
 WORKDIR /app
 COPY docker-compose.yml /app/docker-compose.yml
-COPY .env /app/.env
 COPY services/scheduler/ /app/services/scheduler/
 
 ENV TZ=Europe/Moscow
