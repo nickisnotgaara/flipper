@@ -2815,8 +2815,8 @@ async def saved_filters_delete(fid: int):
 # on the server (workspace 6). Anon access on the server is enabled so we
 # don't need any auth header.
 
-GRIST_BASE_URL = os.getenv("GRIST_BASE_URL", "http://127.0.0.1:8484").rstrip("/")
-GRIST_DOC_ID = os.getenv("GRIST_DOC_ID", "em6piHbbtWXq3oyLYRahnd")
+GRIST_BASE_URL = os.getenv("GRIST_BASE_URL", os.getenv("GRIST_BASE", "http://127.0.0.1:8484")).rstrip("/")
+GRIST_DOC_ID = os.getenv("GRIST_DOC_ID", os.getenv("GRIST_DOC", "em6piHbbtWXq3oyLYRahnd"))
 GRIST_REQ_HEADERS = {
     "X-Requested-With": "XMLHttpRequest",
     "Content-Type": "application/json",
