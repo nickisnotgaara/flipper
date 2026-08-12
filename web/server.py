@@ -2799,3 +2799,195 @@ async def saved_filters_delete(fid: int):
     return {"ok": True, "remaining": len(_SAVED_FILTERS)}
 
 
+# ---- Grist proxy (read-only via Grist SQL API) ----------------------------
+#
+# Grist UI 1.7.17 has a routing bug in single-org mode that 404s on the
+# canonical `<urlId>/<name>/<pageId>` URL. To work around it, we expose a
+# thin proxy in FastAPI: /api/grist/* talks to Grist's own SQL API and
+# returns JSON that the Next.js /grist page can render as a real table.
+#
+# Config (env, with sensible defaults):
+#   GRIST_BASE_URL  — base URL of Grist, e.g. http://host.docker.internal:8484
+#                     (Docker) or http://127.0.0.1:8484 (native on host).
+#   GRIST_DOC_ID    — the doc we want to read. The Flipping doc is fixed.
+#
+# GRIST_DOC_ID default is the legacy "Flipping" doc id that was undeleted
+# on the server (workspace 6). Anon access on the server is enabled so we
+# don't need any auth header.
+
+GRIST_BASE_URL = os.getenv("GRIST_BASE_URL", "http://127.0.0.1:8484").rstrip("/")
+GRIST_DOC_ID = os.getenv("GRIST_DOC_ID", "em6piHbbtWXq3oyLYRahnd")
+GRIST_REQ_HEADERS = {
+    "X-Requested-With": "XMLHttpRequest",
+    "Content-Type": "application/json",
+}
+
+
+def _grist_error(reason: str, status: int = 502):
+    """Helper to return a clean 502 if Grist is unreachable."""
+    return JSONResponse(
+        {"error": "grist_unreachable", "reason": reason, "grist_base": GRIST_BASE_URL},
+        status_code=status,
+    )
+
+
+@app.get("/api/grist/health")
+async def grist_health():
+    """Quick liveness probe — GET /status on Grist."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get(f"{GRIST_BASE_URL}/status", headers={"Accept": "application/json"})
+            return {
+                "grist_base": GRIST_BASE_URL,
+                "grist_status": r.status_code,
+                "reachable": r.status_code == 200,
+            }
+    except Exception as e:
+        return _grist_error(f"{type(e).__name__}: {e}")
+
+
+@app.get("/api/grist/tables")
+async def grist_tables():
+    """List all tables in the doc with row counts.
+
+    Returns: {"doc_id": "...", "tables": [{"id": "...", "rows": int}, ...]}
+    """
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            # Get metadata
+            r = await client.get(
+                f"{GRIST_BASE_URL}/api/docs/{GRIST_DOC_ID}/tables",
+                headers=GRIST_REQ_HEADERS,
+            )
+            if r.status_code != 200:
+                return _grist_error(f"tables metadata: HTTP {r.status_code}", status=502)
+            data = r.json()
+            tables = data.get("tables", [])
+
+            # Fetch row counts in parallel (max 8 at a time)
+            import asyncio
+            sem = asyncio.Semaphore(8)
+
+            async def count(tid):
+                async with sem:
+                    try:
+                        rr = await client.post(
+                            f"{GRIST_BASE_URL}/api/docs/{GRIST_DOC_ID}/sql",
+                            json={"sql": f"SELECT count() AS c FROM `{tid}`"},
+                            headers=GRIST_REQ_HEADERS,
+                            timeout=30.0,
+                        )
+                        if rr.status_code == 200:
+                            recs = rr.json().get("records", [])
+                            c = recs[0].get("fields", {}).get("c") if recs else 0
+                            return c if isinstance(c, int) else 0
+                    except Exception:
+                        pass
+                    return None
+
+            counts = await asyncio.gather(*(count(t["id"]) for t in tables))
+            out = []
+            for t, c in zip(tables, counts):
+                out.append({
+                    "id": t["id"],
+                    "rows": c,
+                    "fields_count": len(t.get("fields", {})) if isinstance(t.get("fields"), dict) else 0,
+                })
+            # Sort: real tables (with rows) first, then empty
+            out.sort(key=lambda x: (-(x["rows"] or 0), x["id"]))
+            return {"doc_id": GRIST_DOC_ID, "grist_base": GRIST_BASE_URL, "tables": out}
+    except Exception as e:
+        return _grist_error(f"{type(e).__name__}: {e}")
+
+
+@app.get("/api/grist/table/{table_id}")
+async def grist_table(table_id: str, limit: int = 50, offset: int = 0):
+    """Read first N rows of a table. Returns records with fields.
+
+    Like Grist's /records endpoint but simpler.
+    """
+    if not table_id or not table_id.replace("_", "").isalnum():
+        return JSONResponse({"error": "bad_table_id"}, status_code=400)
+    if limit < 1 or limit > 500:
+        limit = 50
+    if offset < 0:
+        offset = 0
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Use records API which returns cleaner data than SQL
+            r = await client.get(
+                f"{GRIST_BASE_URL}/api/docs/{GRIST_DOC_ID}/tables/{table_id}/records",
+                params={"limit": limit},
+                headers=GRIST_REQ_HEADERS,
+            )
+            if r.status_code != 200:
+                # Fallback to SQL
+                rr = await client.post(
+                    f"{GRIST_BASE_URL}/api/docs/{GRIST_DOC_ID}/sql",
+                    json={"sql": f"SELECT * FROM `{table_id}` LIMIT {limit}"},
+                    headers=GRIST_REQ_HEADERS,
+                )
+                if rr.status_code != 200:
+                    return _grist_error(f"records: HTTP {r.status_code}, sql: HTTP {rr.status_code}")
+                records = rr.json().get("records", [])
+            else:
+                records = r.json().get("records", [])
+            return {"table_id": table_id, "records": records[:limit], "count": len(records)}
+    except Exception as e:
+        return _grist_error(f"{type(e).__name__}: {e}")
+
+
+@app.post("/api/grist/sql")
+async def grist_sql(payload: dict):
+    """Run an arbitrary SELECT against Grist's SQL endpoint.
+
+    Body: {"sql": "SELECT ..."}
+    Grist only allows SELECT statements, no writes.
+    """
+    sql = (payload or {}).get("sql", "").strip()
+    if not sql:
+        return JSONResponse({"error": "missing_sql"}, status_code=400)
+    if not sql.lower().startswith("select"):
+        return JSONResponse({"error": "only_select_allowed"}, status_code=400)
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            r = await client.post(
+                f"{GRIST_BASE_URL}/api/docs/{GRIST_DOC_ID}/sql",
+                json={"sql": sql},
+                headers=GRIST_REQ_HEADERS,
+            )
+            if r.status_code != 200:
+                return _grist_error(f"Grist SQL: HTTP {r.status_code}: {r.text[:200]}")
+            return r.json()
+    except Exception as e:
+        return _grist_error(f"{type(e).__name__}: {e}")
+
+
+@app.get("/api/grist/columns/{table_id}")
+async def grist_columns(table_id: str):
+    """Return columns metadata for a table.
+
+    Returns: {"table_id": "...", "columns": [{"id": "...", "label": "...", "type": "..."}, ...]}
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(
+                f"{GRIST_BASE_URL}/api/docs/{GRIST_DOC_ID}/tables/{table_id}",
+                headers=GRIST_REQ_HEADERS,
+            )
+            if r.status_code != 200:
+                return _grist_error(f"HTTP {r.status_code}")
+            data = r.json()
+            cols = []
+            for cid, fld in (data.get("columns") or {}).items():
+                cols.append({
+                    "id": cid,
+                    "label": fld.get("label"),
+                    "type": fld.get("type"),
+                    "widgetOptions": fld.get("widgetOptions"),
+                })
+            return {"table_id": table_id, "columns": cols}
+    except Exception as e:
+        return _grist_error(f"{type(e).__name__}: {e}")
+
+

@@ -21,31 +21,22 @@ type NavItem = {
 };
 
 // === Grist configuration ==================================================
-// В Grist осталось 9 таблиц (см. packages/flipper_core/grist.py):
-//   page 13: FILTERS (6)
-//   page 14: Продано   Table1
-//   page 15: Аванс     Table2
-//   page 16: Balans
-//   page 17: Offers_Parser
-//   page 18: Signals_Parser
-//   page 19: Аванс_Продано Table3
-//   page 22: Активные  Active_ads
-//   page 23: База домов Houses2
-const GRIST_URL = 'http://localhost:8484';
-const PARSING_DOC = 'mDaHoGD6yahtxaqugwr5mK';
-/** Deep link to a specific Grist page (each page = one table in this doc). */
-const gristLink = (docId: string, pageId: number) => `${GRIST_URL}/${docId}/flipping/p/${pageId}`;
+// В Grist осталось 9 таблиц (см. packages/flipper_core/grist.py).
+// Сейчас UI Grist имеет баг routing (1.7.17 single-org mode), поэтому
+// "Открыть в Grist" ведёт в основной UI — если он 404, юзер использует
+// /grist внутри админки.
+const GRIST_URL = 'http://217.149.23.102:8484';
+const PARSING_DOC = 'em6piHbbtWXq3oyLYRahnd';
 
 // === Nav: Дашборд (home) + Карта + Таблицы (Grist) =========================
 const NAV: NavItem[] = [
   { label: 'Дашборд', href: '/dashboard', icon: Home },
   { label: 'Карта', href: '/map', icon: Map },
   {
-    label: 'Таблицы',
-    href: gristLink(PARSING_DOC, 14),
+    label: 'Grist Viewer',
+    href: '/grist',
     icon: Database,
     badge: 'Grist',
-    external: true,
   },
 ];
 

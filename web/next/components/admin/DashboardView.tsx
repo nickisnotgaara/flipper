@@ -62,7 +62,7 @@ const QUICK = [
     sub: 'FILTERS, Offers, Balans и др.',
     icon: BarChart3,
     cls: 'bg-indigo-50 text-indigo-700',
-    href: 'http://localhost:8484/mDaHoGD6yahtxaqugwr5mK/p/14',
+    href: 'http://217.149.23.102:8484/o/flipper/em6piHbbtWXq3oyLYRahnd/p/1?table=Houses3',
     external: true,
   },
 ];

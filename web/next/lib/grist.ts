@@ -4,12 +4,29 @@
 // Keep this file in case we need to call Grist's API from server code
 // later (e.g. for embedding a small widget, exporting data, etc.).
 
-export const GRIST_URL = process.env.NEXT_PUBLIC_GRIST_URL ?? 'http://localhost:8484';
+// Production Grist endpoint (self-hosted at 217.149.23.102:8484).
+// Override with NEXT_PUBLIC_GRIST_URL at build time if hosting elsewhere.
+export const GRIST_URL = process.env.NEXT_PUBLIC_GRIST_URL ?? 'http://217.149.23.102:8484';
 
+// Current Grist doc on production hosts the parsing, archives and main data
+// in a single document. Override per-env with NEXT_PUBLIC_GRIST_DOC_*.
 export const GRIST_DOCS = {
-  parsing: process.env.NEXT_PUBLIC_GRIST_DOC_PARSING ?? 'mDaHoGD6yahtxaqugwr5mK',
-  archives: process.env.NEXT_PUBLIC_GRIST_DOC_ARCHIVES ?? 'kaBfATwGgUYjDa8doqMzk3',
-  main: process.env.NEXT_PUBLIC_GRIST_DOC_ID ?? 'rYyn6wJZihqm1TAgkBgPnY',
+  parsing: process.env.NEXT_PUBLIC_GRIST_DOC_PARSING ?? 'em6piHbbtWXq3oyLYRahnd',
+  archives: process.env.NEXT_PUBLIC_GRIST_DOC_ARCHIVES ?? 'em6piHbbtWXq3oyLYRahnd',
+  main: process.env.NEXT_PUBLIC_GRIST_DOC_ID ?? 'em6piHbbtWXq3oyLYRahnd',
+} as const;
+
+// Real table IDs in production Grist doc (the ones with actual data after the
+// 2026-08-12 import). The dashboard/sidebar links use these.
+export const GRIST_TABLES = {
+  houses: 'Houses3',
+  activeAds: 'Active_ads2',
+  soldAds: 'Sold_Ads2',
+  cianFilters: 'Cian_Filters2',
+  offersParser: 'Offers_Parser',
+  arhivProdano: 'Arhiv_Prodano',
+  signalsParser: 'Signals_Parser',
+  balans: 'Balans',
 } as const;
 
 /** Build a deep link to a Grist document (page 1, no specific table). */

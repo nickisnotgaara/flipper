@@ -256,6 +256,12 @@ services:
     environment:
       TZ: Europe/Moscow
       PYTHONPATH: /app
+      # Grist proxy config (для /api/grist/*)
+      # Из Docker-сети до хоста — через host.docker.internal (publish 8484)
+      GRIST_BASE_URL: "${GRIST_BASE_URL:-http://host.docker.internal:8484}"
+      GRIST_DOC_ID: "${GRIST_DOC_ID:-em6piHbbtWXq3oyLYRahnd}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8001:8000"   # host 8001 → container 8000 (host 8000 занят cookie_manager)
     depends_on:
