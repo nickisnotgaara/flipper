@@ -76,8 +76,16 @@ npm run dev
 ```bash
 docker compose up -d app_redis html_to_markdown cookie_manager
 cd ../flippercrawl && docker compose up -d
-# Парсеры (отдельно, по одному):
-docker compose run --rm cian_active --mode offers
+# Активные парсеры (ежедневно / еженедельно запускает scheduler):
+docker compose run --rm cian_active --mode offers           # 10:00, 18:00 MSK
+docker compose run --rm domclick_sold --mode full           # Sun 07:00 MSK
+
+# Заархивированные парсеры (только вручную при необходимости):
+# cp -r _tmp_archive/parsers_manual/<name> services/parsers/
+# (добавь блок в docker-compose.yml, см. _tmp_archive/parsers_manual/README.md)
+docker compose run --rm flatinfo_houses    # раз в 2-3 мес (дома)
+docker compose run --rm winners_sold       # разово (второй источник)
+docker compose run --rm cian_sold          # разово (свежие deactivated)
 ```
 
 ## 3. Частые ошибки и как их избежать
@@ -202,6 +210,26 @@ Self-hosted Grist на `http://localhost:8484` (GRIST_BASE в `.env`). Doc
 8. **Grist `/apply` body — raw JSON-массив**, не обёртка `{"actions": ...}`.
 9. **Retry на 429/500/502/503/504**, не на 413. `GristClient` обрабатывает
    автоматически.
+10. **Conditional formatting — только через `scripts/grist_apply_conditional_formatting.py`**.
+    Cell-style на колонке `status` через `AddEmptyRule(table_id, 0, status_col_ref)`.
+    Row-style (`AddEmptyRule(t, 0, 0)`) НЕ применяется к primary view section —
+    только к `rawViewSectionRef`, который обычно скрыт. Если хочешь закрасить
+    строку, переделывай на cell-style, либо цепляй row-style через
+    `UpdateRecord(_grist_Views_section, primary_id, {"rules": "[…]"})` вручную.
+11. **При `is_active=False` НЕ удаляй из `Offers_Parser`** — только пометь
+    `status="deactivated"`. Юзер хочет видеть всю историю. Дополнительно
+    удали из Grist `Active_ads` через `grist.delete_by_external_id("Active_ads", cian_id)`.
+12. **`find_by_cian_id` ломается на таблицах с `external_id`** (Active_ads, Houses2).
+    SQL `WHERE cian_id = ...` падает с `no such column: cian_id`. Используй
+    `find_by_external_id` / `delete_by_external_id` для этих таблиц.
+13. **Используй только Flippercrawl для парсинга Cian.** Никаких внешних
+    SaaS-парсеров карточек (scrape-as-a-service) в коде или env.
+    Self-hosted Flippercrawl: порт 3002, эндпоинт `/v2/cian/scrape`.
+    Env vars: `FLIPPERCRAWL_API_KEY`, `FLIPPERCRAWL_BASE_URL`.
+14. **3 парсера в архиве, не в active:** `flatinfo_houses`, `winners_sold`,
+    `cian_sold` — лежат в `_tmp_archive/parsers_manual/`. Запускаются вручную
+    (см. `_tmp_archive/parsers_manual/README.md`). Не импортируй их в
+    production-код.
 
 ### Когда менять схему Grist
 

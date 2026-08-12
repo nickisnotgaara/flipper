@@ -5,6 +5,90 @@ Dates: YYYY-MM-DD.
 
 ---
 
+## [Unreleased] — 2026-08-12
+
+### Changed — Архивированы 3 ручных парсера
+
+- **Заархивированы** (больше не запускаются автоматически):
+  - `services/parsers/flatinfo_houses/` → `_tmp_archive/parsers_manual/flatinfo_houses/`
+  - `services/parsers/winners_sold/` → `_tmp_archive/parsers_manual/winners_sold/`
+  - `services/parsers/cian_sold/` → `_tmp_archive/parsers_manual/cian_sold/`
+- **Причина:** дома обновляются раз в 2-3 мес, снятые уже почти все в БД (270k+),
+  разные источники дублируют друг друга. Автозапуск — зря расход ресурсов.
+- **Сопутствующие правки:**
+  - `docker-compose.yml` — убраны сервисы `flatinfo_houses`, `winners_sold`, `cian_sold`
+  - `services/scheduler/main.py` — убран `job_weekly_winners` (больше не нужен)
+  - `services/parsers/__init__.py` — обновлён docstring (2 авто + 3 архив)
+  - `_tmp_archive/parsers_manual/README.md` — инструкция по ручному запуску
+
+### Changed — Ручные парсеры всё ещё доступны
+
+Если нужно разово поднять `flatinfo_houses` или `winners_sold`:
+```bash
+cp -r _tmp_archive/parsers_manual/<parser> services/parsers/
+# (опционально) добавить блок в docker-compose.yml
+docker compose run --rm <parser>
+```
+
+### Changed — Полный rename брендинга на Flippercrawl
+
+- Все упоминания старого scrape-сервиса → `flippercrawl` в коде, .env,
+  _run_*.cmd, docker-compose, docs
+- Старые имена env vars → `FLIPPERCRAWL_*` (`FLIPPERCRAWL_API_KEY`,
+  `FLIPPERCRAWL_BASE_URL`)
+- Legacy fallback в `grist.py` / `cards.py` / `config.py` / `queue.py` удалён
+  (clean break — внешних scrape-сервисов для нас не существует)
+- Документация: `README.md`, `SYSTEM.md`, `DEVELOPMENT.md`, `CHANGELOG.md`,
+  `AGENTS.md`, `PROJECT_OVERVIEW.md`, `ARCHITECTURE.md`
+- Переименован старый debug-скрипт `scripts/dump_*_scrape_body.py` →
+  `scripts/dump_flippercrawl_scrape_body.py` (git mv сохранил историю)
+
+### Fixed — `NameError: status_active is not defined`
+
+- **Баг:** переменная `status_active` создавалась в `_process_url` но использовалась
+  в `_handle_offers` без передачи параметром. Все НЕснятые объявления падали с ошибкой.
+- **Фикс:** `status_active` теперь параметр `_handle_offers(..., status_active)`.
+
+### Fixed — При `is_active=False` строка не удалялась из Grist Active_ads
+
+- **Баг:** парсер при деактивации оставлял строку в Grist `Active_ads` (orphan).
+- **Фикс:** добавлен вызов `grist.delete_by_external_id("Active_ads", cian_id)` при `is_active=False`.
+- **Заодно:** добавлены методы `find_by_external_id` / `delete_by_external_id` в
+  `packages/flipper_core/grist.py` (старый `find_by_cian_id` падал с "no such column:
+  cian_id" на таблицах с `external_id` колонкой).
+
+### Verified — Integration test деактивации
+
+- Создан `_tmp_test_deactivation.py` который вызывает `_handle_offers(..., is_active=False)`
+- Все три поведения проверены и работают:
+  - PG: `cian_active_ads` → удалено, `cian_sold_ads` → добавлено
+  - Grist `Offers_Parser`: status="deactivated" (НЕ удалено, помечено)
+  - Grist `Active_ads`: удалено (фикс работает)
+- Тестовые данные откачены.
+
+### Added — Условное форматирование Grist
+
+- **`scripts/grist_apply_conditional_formatting.py`** — навешивает cell-style правила
+  на колонку `status` во всех 6 парсер-таблицах через Grist user-actions:
+  - `AddEmptyRule(table_id, 0, status_col_ref)` создаёт helper-колонку
+    `gristHelper_ConditionalRule*` с `formula` + `widgetOptions.rulesOptions`.
+  - Идемпотентно: если правило с такой формулой уже есть — обновляет только цвет;
+    если нет — создаёт новое.
+  - Цвета: `deactivated` → серый `#E5E7EB`, `hot` → зелёный `#D1FAE5`,
+    `signal` / `deposited` → жёлтый `#FEF3C7`.
+  - Идемпотентен, поддерживает `--dry-run` и `--tables Sold_Ads,Offers_Parser`.
+- 9 правил применены к: `Sold_Ads`, `Offers_Parser` (×2), `Signals_Parser`,
+  `Table2` (×2), `Table3` (×2), `Arhiv_Prodano`.
+
+### Notes — почему cell-style, а не row-style
+
+В Grist row-style правила (`gristHelper_RowConditionalRule*`) применяются только к
+`rawViewSectionRef`, не к primary view section, которая отображается в UI по
+умолчанию. Cell-style на колонке `status` гарантированно красит ячейку во всех
+view и не зависит от section-иерархии.
+
+---
+
 ## [Unreleased] — 2026-08-11
 
 ### Migration: Google Sheets → Grist (major)
@@ -128,8 +212,8 @@ Dates: YYYY-MM-DD.
 
 ### Added
 
-- `services/parsers/cian_active` — новый активный парсер на flippercrawl (НЕ
-  firecrawl AI extract). Pipeline: `FILTERS` → DB → `Offers_Parser/Sold_Ads`.
+- `services/parsers/cian_active` — новый активный парсер на self-hosted
+  Flippercrawl. Pipeline: `FILTERS` → DB → `Offers_Parser/Sold_Ads`.
 - 6 reference-таблиц в Grist: Houses2 ↔ Active_ads ↔ AdPhotos (cross-table Refs).
 - Pre-aggregated chart tables: HousesByDistrict_v2/v3, ActiveAdsByFilter/Month,
   HousesByDecade/Era/Height, PriceByDecade.
@@ -141,14 +225,13 @@ Dates: YYYY-MM-DD.
 
 ### Added
 
-- `flippercrawl` — self-hosted Firecrawl (НЕ AI extract). Static-путь
-  `data.json.rawOfferData`.
+- `flippercrawl` — self-hosted парсер Cian. Static-путь `data.json.rawOfferData`.
 - `services/cookie_manager` — Chromium + FastAPI для cookie rotation.
 - `services/html_to_markdown` — Go-сервис HTML → Markdown.
 
 ### Changed
 
-- `parsers/cian_active` переехал с прямого HTML-парсинга на Firecrawl.
+- `parsers/cian_active` переехал с прямого HTML-парсинга на Flippercrawl.
 
 ---
 

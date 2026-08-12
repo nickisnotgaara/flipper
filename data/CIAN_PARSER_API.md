@@ -1,6 +1,6 @@
 # API парсера карточек Cian
 
-Документ для клиентского проекта, который ходит в Firecrawl API за данными объявлений Cian.
+Документ для клиентского проекта, который ходит в Flippercrawl API за данными объявлений Cian.
 
 ## Кратко
 
@@ -260,7 +260,7 @@ Content-Type: application/json
 
 ```bash
 curl -s -X POST "https://<HOST>/v2/cian/scrape" \
-  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Authorization: Bearer $FLIPPERCRAWL_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"url":"https://www.cian.ru/sale/flat/313326812/"}'
 ```

@@ -1,4 +1,4 @@
-"""
+﻿"""
 services.parser_cian.models - Pydantic models for Cian real estate ads
 
 Модели данных специфичные для парсера Cian.
@@ -71,7 +71,7 @@ class ParsedAdData(BaseModel):
     """
     Распарсенные данные объявления недвижимости с Cian.
     
-    Это сырая модель, которая выходит из парсера Firecrawl.
+    Это сырая модель, которая выходит из парсера flippercrawl.
     Не должна содержать логику преобразования для Google Sheets.
     """
 
@@ -181,7 +181,7 @@ class ParsedAdData(BaseModel):
         description="Активно ли объявление. False если снято с публикации/продано.",
     )
 
-    # Аванс/задаток (режим avans; извлекает AI по схеме Firecrawl)
+    # Аванс/задаток (режим avans; извлекает AI по схеме flippercrawl)
     has_avans_deposit: Optional[bool] = Field(
         None,
         description="На карточке есть признак внесённого аванса/задатка за объект.",

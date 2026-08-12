@@ -10,20 +10,20 @@ manager, html_to_markdown, опц. `app_postgres`) компонентов.
 | **PostgreSQL 18** (натив) | **Единая БД** для всех (таблицы `houses`, `active_ads`, `sold_ads`) | Windows-native, `127.0.0.1:5432` | always-on |
 | FastAPI `web/server.py` | REST API для фронта | Натив, через `_run_api.cmd` | dev only |
 | Next.js | UI карты 2gis-style | Натив, `npm run dev` | dev only |
-| `flippercrawl-api-1` | Self-hosted Firecrawl (НЕ AI extract) | Docker, `:3002` | always-on (опц. в dev) |
+| `flippercrawl-api-1` | Self-hosted парсер Cian (Flippercrawl) | Docker, `:3002` | always-on (опц. в dev) |
 | `app_postgres` (Docker) | **Устаревшая** копия БД со старыми/сырыми данными. Не использовать для dev! | Docker, `:5432` | always-on (опц.) |
 | `app_redis` | Redis для `cookie_manager` | Docker, `:6379` | always-on (опц. в dev) |
 | `html_to_markdown` | Go-сервис конвертации HTML → Markdown (для `cian_active`) | Docker, `:8090` | always-on (опц. в dev) |
-| `cookie_manager` | Микросервис управления cookies для Firecrawl (Chromium + FastAPI) | Docker, `:8000` | always-on (опц. в dev) |
+| `cookie_manager` | Микросервис управления cookies для Flippercrawl (Chromium + FastAPI) | Docker, `:8000` | always-on (опц. в dev) |
 | `scheduler` | APScheduler: cron-подобный запуск парсеров | Docker, prod only | prod only |
-| `cian_active` | **Активные** объявления CIAN через Firecrawl + Grist (вместо Google Sheets) | Docker | 10:00, 18:00 |
+| `cian_active` | **Активные** объявления CIAN через Flippercrawl + Grist (вместо Google Sheets) | Docker | 10:00, 18:00 |
 | `category_counter` | Подсчёт объявлений CIAN по категориям (таблица `Balans` в Grist) | Docker | 09:00 |
 | `cian_sold` | **Снятые публикации** CIAN (deactivated_offers) → PostgreSQL | Docker | **вручную** |
 | `winners_sold` | Снятые публикации baza-winner.ru → PostgreSQL | Docker | **Sun 06:00** (еженедельно) |
 | `domclick_sold` | Снятые публикации domclick.ru → PostgreSQL | Docker | **Sun 07:00** (еженедельно) |
 | `flatinfo_houses` | Реестр домов flatinfo.ru → PostgreSQL | Docker | **вручную** |
 
-Внешняя зависимость: **self-hosted Firecrawl** (отдельный docker-compose, сеть `firecrawl_backend`).
+Внешняя зависимость: **self-hosted Flippercrawl** (отдельный docker-compose, сеть `flippercrawl_backend`).
 
 ---
 
@@ -239,13 +239,13 @@ docker compose run --rm cian_active --mode avans
 
 ```
 Step 1: Валидация конфигурации (.env)
-Step 2: Инициализация (SQLite, Grist, Firecrawl)
+Step 2: Инициализация (SQLite, Grist, Flippercrawl)
 Step 3: Получение поисковых URL
          offers  → из таблицы FILTERS (Grist)
          avans   → статичный URL из config
 Step 4: Извлечение ссылок объявлений из поисковых страниц
          (cianparser + ротация прокси из data/proxies.txt)
-Step 5: Парсинг каждого объявления через Firecrawl
+Step 5: Парсинг каждого объявления через Flippercrawl
          (N параллельных воркеров, QueueManager)
 Step 6: Итоговый отчёт
 ```
@@ -254,7 +254,7 @@ Step 6: Итоговый отчёт
 
 Данные собираются из **трёх источников**:
 
-1. **Firecrawl AI-экстракция** — JSON-схема через LLM (цена, адрес, описание, история цен, ремонт, площадь, этажи и т.д.)
+1. **Flippercrawl static-экстракция** — JSON из state.offerData (цена, адрес, описание, история цен, ремонт, площадь, этажи и т.д.)
 2. **rawHtml** — `creationDate` из встроенных JSON-LD скриптов страницы (точная дата публикации)
 3. **Cian Statistics API** — `days_in_exposition`, `total_views`, `unique_views` (через API `/api/analytics/`)
 
@@ -347,12 +347,12 @@ Scheduler автоматически:
 services/parsers/
 ├── _common.py                       # общий код (setup_logging, run_subprocess, safe_*)
 │
-├── cian_active/                     # активные CIAN (Firecrawl + Grist)
+├── cian_active/                     # активные CIAN (Flippercrawl + Grist)
 │   ├── main.py                      # оркестратор
 │   ├── config.py                    # Pydantic Settings (.env)
 │   ├── importer.py                  # импорт из data/parser_cian.db → active_ads (filter_id 1-6)
 │   ├── acquirer/                    # всё что нужно для парсинга
-│   │   ├── cards.py                 # parse individual ads (Firecrawl)
+│   │   ├── cards.py                 # parse individual ads (Flippercrawl)
 │   │   ├── search.py                # parse search pages
 │   │   ├── queue.py                 # concurrency
 │   │   ├── models.py                # Pydantic models
@@ -517,7 +517,7 @@ docker compose run --rm api alembic revision --autogenerate -m "add X to houses"
 Новая ссылка с поисковой страницы (cian_active)
   ↓
 houses (source=cian_active, external_house_id=...)
-  ↓ парсинг Firecrawl
+  ↓ парсинг Flippercrawl
 active_ads (source=cian_active, filter_id=1..6, is_parsed=True)
   ↓
   ├─ is_active=True → остаётся, парсится повторно при следующем запуске
@@ -536,7 +536,7 @@ active_ads (source=cian_active, filter_id=1..6, is_parsed=True)
 
 Ротация: случайный выбор из списка для каждого запроса.
 
-Firecrawl работает со своими прокси/без прокси (отдельная инфраструктура).
+Flippercrawl работает со своими прокси/без прокси (отдельная инфраструктура).
 
 ---
 

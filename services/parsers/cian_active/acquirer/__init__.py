@@ -1,7 +1,7 @@
 """services.parsers.cian_active.acquirer - парсер активных объявлений Cian.
 
 Подмодули:
-    cards.py     - парсинг отдельных объявлений через Firecrawl (ранее parser.py)
+    cards.py     - парсинг отдельных объявлений через Flippercrawl (ранее parser.py)
     search.py    - парсинг поисковых страниц (ранее search_parser.py)
     queue.py     - параллельный запуск парсинга (ранее queue_manager.py)
     models.py    - Pydantic-модели (ParsedAdData и т.п.)

@@ -6,7 +6,7 @@ Shadow-сравнение POST /v2/scrape (legacy LLM) и POST /v2/cian/scrape (
   python scripts/compare_cian_scrape_apis.py
   python scripts/compare_cian_scrape_apis.py --cookie "name=value; ..."
 
-Требует живой flippercrawl (FIRECRAWL_BASE_URL, FIRECRAWL_API_KEY).
+Требует живой flippercrawl (FLIPPERCRAWL_BASE_URL, FLIPPERCRAWL_API_KEY).
 """
 
 from __future__ import annotations
@@ -148,8 +148,8 @@ def _post_scrape(
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--base-url", default=os.getenv("FIRECRAWL_BASE_URL", "http://localhost:3002"))
-    ap.add_argument("--api-key", default=os.getenv("FIRECRAWL_API_KEY", "test-key"))
+    ap.add_argument("--base-url", default=os.getenv("FLIPPERCRAWL_BASE_URL", "http://localhost:3002"))
+    ap.add_argument("--api-key", default=os.getenv("FLIPPERCRAWL_API_KEY", "test-key"))
     ap.add_argument("--cookie", default="", help="Cookie string for Cian")
     ap.add_argument("--urls-file", default="", help="JSON file with list of URLs")
     ap.add_argument("--skip-legacy", action="store_true", help="Only smoke-test /v2/cian/scrape")

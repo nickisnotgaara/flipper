@@ -28,12 +28,13 @@ class Settings(BaseSettings):
         description="PostgreSQL connection URL (DATABASE_URL in .env / docker-compose environment)",
     )
 
-    # === Firecrawl API ===
-    firecrawl_api_key: str = ""
-    """API ключ для Firecrawl (обязательно)"""
+    # === Flippercrawl API ===
+    flippercrawl_api_key: str = ""
+    """API ключ для self-hosted Flippercrawl (env: FLIPPERCRAWL_API_KEY)"""
 
-    firecrawl_base_url: str = "http://localhost:3002"
-    """Self-hosted Firecrawl (эндпоинт /v2/cian/scrape). В Docker: http://flippercrawl-api-1:3002"""
+    flippercrawl_base_url: str = "http://localhost:3002"
+    """Self-hosted Flippercrawl (эндпоинт /v2/cian/scrape). В Docker: http://flippercrawl-api-1:3002
+    (env: FLIPPERCRAWL_BASE_URL)"""
 
     use_proxies_for_search: bool = Field(
         default=True,
@@ -66,7 +67,7 @@ class Settings(BaseSettings):
 
     # === Parser Settings ===
     parser_concurrency: int = 50
-    """Параллельных воркеров к Firecrawl (PARSER_CONCURRENCY в .env). При ReadTimeout уменьшите."""
+    """Параллельных воркеров к Flippercrawl (PARSER_CONCURRENCY в .env). При ReadTimeout уменьшите."""
 
     regular_search_max_pages: int = Field(
         default=100,
@@ -142,10 +143,9 @@ class Settings(BaseSettings):
     def __init__(self, **data):
         super().__init__(**data)
 
-        if not self.firecrawl_api_key:
+        if not self.flippercrawl_api_key:
             raise ValueError(
-                "FIRECRAWL_API_KEY не установлена в .env файле. "
-                "Получите ключ на https://firecrawl.dev"
+                "FLIPPERCRAWL_API_KEY не установлена в .env файле."
             )
 
         self._pop_obsolete_scraper_api_env()

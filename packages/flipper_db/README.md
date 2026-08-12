@@ -65,7 +65,7 @@ await repo.upsert_sold_offers_batch(sold_ads)
 - `raw_data` JSONB — fallback для ненормализованных полей
 
 ### `active_ads` (активные объявления)
-- Сейчас пишет только `cian_active` (через Firecrawl + Google Sheets).
+- Сейчас пишет только `cian_active` (через Flippercrawl + Grist).
 - `source` + `cian_id` — уникальный ключ.
 - `house_id` FK → `houses.id` (nullable, до первой нормализации).
 - `is_active` — флаг (если False, запись считается "снятой").

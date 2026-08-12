@@ -1,4 +1,4 @@
-"""
+﻿"""
 services.parser_cian.queue_manager - Asynchronous queue management
 
 Manages async URL queue for parsing with concurrency limits.
@@ -284,7 +284,7 @@ class QueueManager:
             except ValueError as exc:
                 err = str(exc)
                 retryable = (
-                    "firecrawl" in err.lower()
+                    "flippercrawl" in err.lower()
                     or "scrape" in err.lower()
                     or "incomplete cian page" in err.lower()
                 )

@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 _DOCKER_TO_LOCAL = {
-    "FIRECRAWL_BASE_URL": ("flippercrawl-api-1", "localhost"),
+    "FLIPPERCRAWL_BASE_URL": ("flippercrawl-api-1", "localhost"),
     "COOKIE_MANAGER_URL": ("cookie_manager", "localhost"),
 }
 for _env_key, (_docker_host, _local_host) in _DOCKER_TO_LOCAL.items():
@@ -139,8 +139,12 @@ async def test_ads():
 
     parser = AdParser(
         cookie_manager_url=os.getenv("COOKIE_MANAGER_URL", "http://localhost:8000"),
-        firecrawl_base_url=os.getenv("FIRECRAWL_BASE_URL", "http://localhost:3002"),
-        firecrawl_api_key=os.getenv("FIRECRAWL_API_KEY", "test-key"),
+        flippercrawl_base_url=os.getenv(
+            "FLIPPERCRAWL_BASE_URL", "http://localhost:3002"
+        ),
+        flippercrawl_api_key=os.getenv(
+            "FLIPPERCRAWL_API_KEY", "test-key"
+        ),
     )
 
     logger.info(

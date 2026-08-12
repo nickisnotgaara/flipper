@@ -1,4 +1,4 @@
-"""Fixtures for parser_cian unit tests."""
+﻿"""Fixtures for parser_cian unit tests."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ SAMPLE_COOKIE = "_CIAN_GK=test; session_region_id=1"
 
 
 @pytest.fixture
-def sample_firecrawl_json() -> dict:
+def sample_flippercrawl_json() -> dict:
     return {
         "cian_id": SAMPLE_CIAN_ID,
         "price": 9_405_000,
@@ -45,7 +45,7 @@ def sample_firecrawl_json() -> dict:
 
 
 @pytest.fixture
-def sample_firecrawl_response(sample_firecrawl_json: dict) -> dict:
+def sample_flippercrawl_response(sample_flippercrawl_json: dict) -> dict:
     creation_date = "2025-02-06"
     raw_html = (
         f'<html><body>"creationDate":"{creation_date}T10:00:00"</body></html>'
@@ -56,7 +56,7 @@ def sample_firecrawl_response(sample_firecrawl_json: dict) -> dict:
             "markdown": "# listing",
             "rawHtml": raw_html,
             "json": {
-                **sample_firecrawl_json,
+                **sample_flippercrawl_json,
                 "_extraction_mode": "static",
             },
         },

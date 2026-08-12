@@ -106,11 +106,11 @@ psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE flipper OWNER flipper;"
 DATABASE_URL=postgresql+asyncpg://flipper:flipper_secret@127.0.0.1:5432/flipper
 POSTGRES_PASSWORD=flipper_secret
 
-# Flippercrawl — наш кастомный парсер cian, **НЕ firecrawl AI extract**.
+# Flippercrawl — наш self-hosted парсер Cian.
 # Отдельный docker-compose: ../flippercrawl/ на :3002.
 # Только static-путь (data.json.rawOfferData). LLM/AI fallback НЕ используем.
-FIRECRAWL_API_KEY=local
-FIRECRAWL_BASE_URL=http://flippercrawl-api-1:3002
+FLIPPERCRAWL_API_KEY=local
+FLIPPERCRAWL_BASE_URL=http://flippercrawl-api-1:3002
 
 # Grist (self-hosted UI-таблица для cian_active + аналитика)
 # Заменил Google Sheets в 2026-08 — поддержка batch apply, нет OAuth-геморроя,
@@ -149,7 +149,7 @@ NEXT_PUBLIC_API_BASE=http://localhost:8001
 | Порт | Сервис | Проект | Доступ |
 |---|---|---|---|
 | **3000** | Next.js dev | flipper (натив) | http://localhost:3000 |
-| **3002** | **Flippercrawl** (НЕ firecrawl) | flippercrawl (Docker, опц.) | http://localhost:3002 |
+| **3002** | **Flippercrawl** | flippercrawl (Docker, опц.) | http://localhost:3002 |
 | **5432** | **PostgreSQL (локальный)** | flipper (натив) | localhost:5432 |
 | **6379** | Redis | flipper (Docker, опц.) | localhost:6379 |
 | **8000** | Cookie Manager | flipper (Docker, опц.) | http://localhost:8000 |
@@ -274,7 +274,7 @@ npm run dev
 Парсеры запускаются как одноразовые контейнеры через compose:
 
 ```bash
-# Активные CIAN (через Firecrawl + Google Sheets) — основной парсер
+# Активные CIAN (через Flippercrawl + Grist) — основной парсер
 docker compose run --rm cian_active --mode offers
 docker compose run --rm cian_active --mode avans
 
@@ -357,6 +357,30 @@ py -3.11 scripts/sync_sold_to_grist.py --limit 1000 --dry-run
 - `19:30` — `sync_sold_to_grist.py`
 
 Оба скрипта идемпотентны (skip по `cian_id`), повторный запуск не дублирует.
+
+### Conditional formatting (раскраска строк по `status`)
+
+```bash
+py -3.11 scripts/grist_apply_conditional_formatting.py        # применить
+py -3.11 scripts/grist_apply_conditional_formatting.py --dry-run
+py -3.11 scripts/grist_apply_conditional_formatting.py --tables Sold_Ads,Offers_Parser
+```
+
+Создаёт cell-style правила через Grist `AddEmptyRule(table_id, 0, status_col_ref)`
+на колонке `status`. Каждое правило = helper-колонка `gristHelper_ConditionalRule*`
+с `formula` (например `$status == 'deactivated'`) + `widgetOptions.rulesOptions`
+(JSON `{fillColor, textColor}`).
+
+| status        | fill      | text      | таблицы |
+|---------------|-----------|-----------|---------|
+| `deactivated` | `#E5E7EB` | `#374151` | Sold_Ads, Offers_Parser, Table2, Table3, Arhiv_Prodano |
+| `hot`         | `#D1FAE5` | `#065F46` | Offers_Parser |
+| `signal`      | `#FEF3C7` | `#92400E` | Signals_Parser |
+| `deposited`   | `#FEF3C7` | `#92400E` | Table2, Table3 |
+
+Идемпотентен: повторный запуск не дублирует правила. Row-style (`AddEmptyRule(t,
+0, 0)`) не работает — применяется только к `rawViewSectionRef`, который
+не показывается в UI; используй cell-style.
 
 ### Ручная запись в Grist (для тестов)
 
@@ -498,7 +522,7 @@ PG перестанет быть доступен. Решения:
 Это нормально — `start_period: 180s` в compose. Cookie Manager поднимает
 Chromium + NoVNC, это медленно. Дождаться статуса `healthy`.
 
-### Firecrawl не отвечает
+### Flippercrawl не отвечает
 ```bash
 cd ../flippercrawl && docker compose ps
 # Все сервисы должны быть Up:

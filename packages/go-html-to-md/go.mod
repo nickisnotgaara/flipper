@@ -1,9 +1,9 @@
-module github.com/firecrawl/go-html-to-md-service
+module github.com/flipper/go-html-to-md-service
 
 go 1.23.0
 
 require (
-	github.com/firecrawl/html-to-markdown v0.0.0-20260312013131-1af9901a5d61
+	github.com/JohannesKaufmann/html-to-markdown v1.4.0
 	github.com/gorilla/mux v1.8.1
 	github.com/rs/zerolog v1.33.0
 )
@@ -19,5 +19,3 @@ require (
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
-
-replace github.com/JohannesKaufmann/html-to-markdown => github.com/firecrawl/html-to-markdown v0.0.0-20260305014655-0ec744e89d3c

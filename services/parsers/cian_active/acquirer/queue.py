@@ -287,7 +287,7 @@ class QueueManager:
         else:
             success = await self._handle_offers(
                 worker_id, url, parsed_data, parsed_dict, row, sold_tab,
-                signals_match, signal_reason, loop,
+                signals_match, signal_reason, loop, status_active,
             )
 
         if success:
@@ -309,7 +309,7 @@ class QueueManager:
             except ValueError as exc:
                 err = str(exc)
                 retryable = (
-                    "firecrawl" in err.lower()
+                    "flippercrawl" in err.lower()
                     or "scrape" in err.lower()
                     or "incomplete cian page" in err.lower()
                 )
@@ -426,7 +426,7 @@ class QueueManager:
 
     async def _handle_offers(
         self, worker_id, url, parsed_data, parsed_dict, row, sold_tab,
-        signals_match, signal_reason, loop,
+        signals_match, signal_reason, loop, status_active,
     ) -> bool:
         is_active = parsed_data.is_active
         publish_date = parsed_data.publish_date or ""
@@ -470,6 +470,15 @@ class QueueManager:
                         row, str(parsed_data.cian_id),
                         offers_match=True, signals_match=signals_match,
                         deactivated=True, status="deactivated",
+                    ),
+                )
+                # Снятое объявление — убираем из Grist Active_ads (там ключ
+                # external_id, поэтому отдельный метод; find_by_cian_id для
+                # Active_ads падает с "no such column: cian_id").
+                await loop.run_in_executor(
+                    None,
+                    lambda: self.grist.delete_by_external_id(
+                        "Active_ads", parsed_data.cian_id
                     ),
                 )
             return bool(result.get("offers_ok"))

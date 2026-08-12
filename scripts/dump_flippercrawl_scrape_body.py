@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Печатает JSON body для POST {FIRECRAWL_BASE_URL}/v2/cian/scrape — как в AdParser.parse_async:
+Печатает JSON body для POST {FLIPPERCRAWL_BASE_URL}/v2/cian/scrape — как в AdParser.parse_async:
 только url и опционально headers.Cookie.
 
 Запуск из корня репозитория:
-  python scripts/dump_firecrawl_scrape_body.py
-  python scripts/dump_firecrawl_scrape_body.py "https://www.cian.ru/sale/flat/326002860/" --cookie "name=value; ..."
+  python scripts/dump_flippercrawl_scrape_body.py
+  python scripts/dump_flippercrawl_scrape_body.py "https://www.cian.ru/sale/flat/326002860/" --cookie "name=value; ..."
 """
 
 from __future__ import annotations

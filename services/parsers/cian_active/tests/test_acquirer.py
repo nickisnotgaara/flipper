@@ -24,14 +24,14 @@ from services.parsers.cian_active.acquirer.cards import (
 from .conftest import SAMPLE_COOKIE, SAMPLE_URL, sample_cian_stats_response  # noqa: F401
 
 COOKIE_MANAGER = "http://cookie-manager.test"
-FIRECRAWL_BASE = "http://firecrawl.test"
+FLIPPERCRAWL_BASE = "http://flippercrawl.test"
 
 
 def _make_parser() -> AdParser:
     return AdParser(
         cookie_manager_url=COOKIE_MANAGER,
-        firecrawl_base_url=FIRECRAWL_BASE,
-        firecrawl_api_key="test-key",
+        flippercrawl_base_url=FLIPPERCRAWL_BASE,
+        flippercrawl_api_key="test-key",
         cookies_cache_ttl_sec=3600.0,
     )
 
@@ -97,23 +97,23 @@ def test_normalize_data_preserves_server_price_history():
 # ============================================================ AdParser integration
 
 @respx.mock
-def test_firecrawl_url_is_cian_scrape():
+def test_flippercrawl_url_is_cian_scrape():
     parser = _make_parser()
-    assert parser.firecrawl_api_url == "http://firecrawl.test/v2/cian/scrape"
+    assert parser.flippercrawl_api_url == "http://flippercrawl.test/v2/cian/scrape"
 
 
 @respx.mock
 @pytest.mark.asyncio
-async def test_payload_minimal(sample_firecrawl_response):
+async def test_payload_minimal(sample_flippercrawl_response):
     _mock_cookies(respx.get(f"{COOKIE_MANAGER}/cookies"))
 
     captured: dict = {}
 
     def _capture(request: httpx.Request) -> httpx.Response:
         captured["body"] = json.loads(request.content)
-        return httpx.Response(200, json=sample_firecrawl_response)
+        return httpx.Response(200, json=sample_flippercrawl_response)
 
-    respx.post(f"{FIRECRAWL_BASE}/v2/cian/scrape").mock(side_effect=_capture)
+    respx.post(f"{FLIPPERCRAWL_BASE}/v2/cian/scrape").mock(side_effect=_capture)
     respx.get(url__regex=r"https://api\.cian\.ru/.*").respond(
         json={
             "totalViews": "10 просмотров с 06.02.2025",
@@ -134,10 +134,10 @@ async def test_payload_minimal(sample_firecrawl_response):
 
 @respx.mock
 @pytest.mark.asyncio
-async def test_parse_success_static(sample_firecrawl_response):
+async def test_parse_success_static(sample_flippercrawl_response):
     _mock_cookies(respx.get(f"{COOKIE_MANAGER}/cookies"))
-    respx.post(f"{FIRECRAWL_BASE}/v2/cian/scrape").respond(
-        json=sample_firecrawl_response
+    respx.post(f"{FLIPPERCRAWL_BASE}/v2/cian/scrape").respond(
+        json=sample_flippercrawl_response
     )
     respx.get(url__regex=r"https://api\.cian\.ru/.*").respond(
         json={
@@ -163,15 +163,15 @@ async def test_parse_success_static(sample_firecrawl_response):
 
 @respx.mock
 @pytest.mark.asyncio
-async def test_parse_success_llm_fallback(sample_firecrawl_response):
+async def test_parse_success_llm_fallback(sample_flippercrawl_response):
     _mock_cookies(respx.get(f"{COOKIE_MANAGER}/cookies"))
-    llm_response = sample_firecrawl_response.copy()
-    llm_response["data"] = sample_firecrawl_response["data"].copy()
+    llm_response = sample_flippercrawl_response.copy()
+    llm_response["data"] = sample_flippercrawl_response["data"].copy()
     llm_response["data"]["json"] = {
-        **sample_firecrawl_response["data"]["json"],
+        **sample_flippercrawl_response["data"]["json"],
         "_extraction_mode": "llm",
     }
-    respx.post(f"{FIRECRAWL_BASE}/v2/cian/scrape").respond(json=llm_response)
+    respx.post(f"{FLIPPERCRAWL_BASE}/v2/cian/scrape").respond(json=llm_response)
     respx.get(url__regex=r"https://api\.cian\.ru/.*").respond(
         json={"daily": {"dailyViews": []}}
     )
@@ -186,11 +186,11 @@ async def test_parse_success_llm_fallback(sample_firecrawl_response):
 
 @respx.mock
 @pytest.mark.asyncio
-async def test_extraction_mode_logged(sample_firecrawl_response, caplog):
+async def test_extraction_mode_logged(sample_flippercrawl_response, caplog):
     caplog.set_level(logging.INFO)
     _mock_cookies(respx.get(f"{COOKIE_MANAGER}/cookies"))
-    respx.post(f"{FIRECRAWL_BASE}/v2/cian/scrape").respond(
-        json=sample_firecrawl_response
+    respx.post(f"{FLIPPERCRAWL_BASE}/v2/cian/scrape").respond(
+        json=sample_flippercrawl_response
     )
     respx.get(url__regex=r"https://api\.cian\.ru/.*").respond(
         json={"daily": {"dailyViews": []}}
@@ -209,7 +209,7 @@ async def test_extraction_mode_logged(sample_firecrawl_response, caplog):
 @pytest.mark.asyncio
 async def test_captcha_raises():
     _mock_cookies(respx.get(f"{COOKIE_MANAGER}/cookies"))
-    respx.post(f"{FIRECRAWL_BASE}/v2/cian/scrape").respond(
+    respx.post(f"{FLIPPERCRAWL_BASE}/v2/cian/scrape").respond(
         json={
             "success": True,
             "data": {
@@ -227,10 +227,10 @@ async def test_captcha_raises():
 
 @respx.mock
 @pytest.mark.asyncio
-async def test_creation_date_triggers_stats(sample_firecrawl_response):
+async def test_creation_date_triggers_stats(sample_flippercrawl_response):
     _mock_cookies(respx.get(f"{COOKIE_MANAGER}/cookies"))
-    respx.post(f"{FIRECRAWL_BASE}/v2/cian/scrape").respond(
-        json=sample_firecrawl_response
+    respx.post(f"{FLIPPERCRAWL_BASE}/v2/cian/scrape").respond(
+        json=sample_flippercrawl_response
     )
     stats_route = respx.get(url__regex=r"https://api\.cian\.ru/.*")
     stats_route.respond(
@@ -256,15 +256,15 @@ async def test_creation_date_triggers_stats(sample_firecrawl_response):
 
 @respx.mock
 @pytest.mark.asyncio
-async def test_retry_on_scrape_all_engines_failed(sample_firecrawl_response):
+async def test_retry_on_scrape_all_engines_failed(sample_flippercrawl_response):
     _mock_cookies(respx.get(f"{COOKIE_MANAGER}/cookies"))
-    route = respx.post(f"{FIRECRAWL_BASE}/v2/cian/scrape")
+    route = respx.post(f"{FLIPPERCRAWL_BASE}/v2/cian/scrape")
     route.side_effect = [
         httpx.Response(
             500,
             json={"success": False, "code": "SCRAPE_ALL_ENGINES_FAILED"},
         ),
-        httpx.Response(200, json=sample_firecrawl_response),
+        httpx.Response(200, json=sample_flippercrawl_response),
     ]
     respx.get(url__regex=r"https://api\.cian\.ru/.*").respond(
         json={"daily": {"dailyViews": []}}

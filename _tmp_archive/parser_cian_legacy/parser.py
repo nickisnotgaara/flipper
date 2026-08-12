@@ -1,9 +1,9 @@
-"""
-services.parser_cian.parser - AdParser for self-hosted Firecrawl integration
+﻿"""
+services.parser_cian.parser - AdParser for self-hosted flippercrawl integration
 
-Парсер объявлений недвижимости с использованием self-hosted Firecrawl API.
+Парсер объявлений недвижимости с использованием self-hosted flippercrawl API.
 Данные поступают из трёх источников:
-  1. Firecrawl /v2/cian/scrape (статический парсер; LLM только при fallback)
+  1. flippercrawl /v2/cian/scrape (статический парсер; LLM только при fallback)
   2. rawHtml страницы (creationDate из embedded JSON скриптов)
   3. Cian Statistics API (days_in_exposition, total_views, unique_views)
 """
@@ -378,10 +378,10 @@ def _clean_cian_description(raw: str) -> str:
 
 class AdParser:
     """
-    Парсер объявлений Cian через self-hosted Firecrawl API v2.
+    Парсер объявлений Cian через self-hosted flippercrawl API v2.
 
     Источники данных:
-    - Firecrawl /v2/cian/scrape: основные поля (статический парсер, LLM fallback)
+    - flippercrawl /v2/cian/scrape: основные поля (статический парсер, LLM fallback)
     - rawHtml: creationDate для запроса статистики
     - Cian API: days_in_exposition, total_views, unique_views (точные данные)
 
@@ -393,8 +393,8 @@ class AdParser:
     def __init__(
         self,
         cookie_manager_url: str = "http://cookie_manager:8000",
-        firecrawl_base_url: Optional[str] = None,
-        firecrawl_api_key: Optional[str] = None,
+        FLIPPERCRAWL_BASE_URL: Optional[str] = None,
+        FLIPPERCRAWL_API_KEY: Optional[str] = None,
         cookies_cache_ttl_sec: float = 90.0,
     ):
         """
@@ -402,14 +402,14 @@ class AdParser:
             cookie_manager_url: URL микросервиса управления куками
                 Для локальной разработки: http://localhost:8000
                 Для Docker: http://cookie_manager:8000
-            firecrawl_base_url: База self-hosted Firecrawl (из settings / FIRECRAWL_BASE_URL)
-            firecrawl_api_key: Ключ API (из settings / FIRECRAWL_API_KEY)
+            FLIPPERCRAWL_BASE_URL: База self-hosted flippercrawl (из settings / FLIPPERCRAWL_BASE_URL)
+            FLIPPERCRAWL_API_KEY: Ключ API (из settings / FLIPPERCRAWL_API_KEY)
             cookies_cache_ttl_sec: Кэш строки Cookie на N секунд (меньше дублей GET /cookies)
         """
-        self.api_key = (firecrawl_api_key or os.getenv("FIRECRAWL_API_KEY", "test-key")).strip()
+        self.api_key = (FLIPPERCRAWL_API_KEY or os.getenv("FLIPPERCRAWL_API_KEY", "test-key")).strip()
 
-        base = (firecrawl_base_url or os.getenv("FIRECRAWL_BASE_URL", "http://localhost:3002")).rstrip("/")
-        self.firecrawl_api_url = f"{base}/v2/cian/scrape"
+        base = (FLIPPERCRAWL_BASE_URL or os.getenv("FLIPPERCRAWL_BASE_URL", "http://localhost:3002")).rstrip("/")
+        self.flippercrawl_api_url = f"{base}/v2/cian/scrape"
 
         self.cookie_manager_url = cookie_manager_url.rstrip("/")
         self._cookies_lock = asyncio.Lock()
@@ -418,7 +418,7 @@ class AdParser:
         self._cookies_cache_ttl_sec = cookies_cache_ttl_sec
 
         logger.info(
-            f"AdParser initialized with self-hosted Firecrawl: {self.firecrawl_api_url}"
+            f"AdParser initialized with self-hosted flippercrawl: {self.flippercrawl_api_url}"
         )
         logger.info(f"Cookie Manager URL: {self.cookie_manager_url}")
 
@@ -743,11 +743,11 @@ class AdParser:
 
     async def parse_async(self, url: str) -> ParsedAdData:
         """
-        Парсит одно объявление через self-hosted Firecrawl API.
+        Парсит одно объявление через self-hosted flippercrawl API.
 
         Этапы:
         1. Получаем куки из Cookie Manager
-        2. Запрашиваем Firecrawl /v2/cian/scrape (статический парсер + rawHtml)
+        2. Запрашиваем flippercrawl /v2/cian/scrape (статический парсер + rawHtml)
         3. Из rawHtml извлекаем creationDate
         4. Из Cian API получаем точную статистику (переопределяет данные карточки)
         5. Собираем ParsedAdData
@@ -795,21 +795,21 @@ class AdParser:
         }
 
         try:
-            # Firecrawl иногда отвечает 500 SCRAPE_ALL_ENGINES_FAILED (часто из‑за таймаута/прокси).
+            # flippercrawl иногда отвечает 500 SCRAPE_ALL_ENGINES_FAILED (часто из‑за таймаута/прокси).
             # В этом случае ждём 5 секунд и пробуем до 3 раз, затем сдаёмся.
             response = None
             for attempt in range(3):
                 try:
-                    # trust_env=False: иначе HTTP(S)_PROXY шлёт запрос на внутренний хост Firecrawl
+                    # trust_env=False: иначе HTTP(S)_PROXY шлёт запрос на внутренний хост flippercrawl
                     # через мобильный прокси → getaddrinfo flippercrawl-api-1 не резолвится.
                     async with httpx.AsyncClient(timeout=180.0, trust_env=False) as client:
                         response = await client.post(
-                            self.firecrawl_api_url, json=payload, headers=headers
+                            self.flippercrawl_api_url, json=payload, headers=headers
                         )
                 except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout, OSError) as e:
                     if attempt < 2:
                         logger.warning(
-                            "Firecrawl network error (attempt %s/3) for %s: %s. Retrying in 5s...",
+                            "flippercrawl network error (attempt %s/3) for %s: %s. Retrying in 5s...",
                             attempt + 1,
                             url,
                             e,
@@ -836,7 +836,7 @@ class AdParser:
 
                 if retryable and attempt < 2:
                     logger.warning(
-                        "Firecrawl 5xx %s (SCRAPE_ALL_ENGINES_FAILED) attempt %s/3 for %s. Retrying in 5s...",
+                        "flippercrawl 5xx %s (SCRAPE_ALL_ENGINES_FAILED) attempt %s/3 for %s. Retrying in 5s...",
                         response.status_code,
                         attempt + 1,
                         url,
@@ -846,20 +846,20 @@ class AdParser:
 
                 # non-retryable or last attempt
                 raise ValueError(
-                    f"Firecrawl API error: {response.status_code} - {response.text[:200]}"
+                    f"flippercrawl API error: {response.status_code} - {response.text[:200]}"
                 )
 
             if response is None or response.status_code != 200:
-                raise ValueError("Firecrawl API error: no successful response after retries")
+                raise ValueError("flippercrawl API error: no successful response after retries")
 
             result = response.json()
 
             if not result.get("success"):
-                logger.warning(f"Firecrawl returned success=false for {url}")
-                raise ValueError("Firecrawl API returned success=false")
+                logger.warning(f"flippercrawl returned success=false for {url}")
+                raise ValueError("flippercrawl API returned success=false")
 
             if "data" not in result:
-                raise ValueError("No data in Firecrawl response")
+                raise ValueError("No data in flippercrawl response")
 
             data_obj = result["data"]
 
@@ -876,7 +876,7 @@ class AdParser:
                 or "ой! доступ ограничен" in raw_lower
             ):
                 raise ValueError(
-                    "Firecrawl returned Cian captcha page (incomplete cian page)"
+                    "flippercrawl returned Cian captcha page (incomplete cian page)"
                 )
 
             # 4. Проверяем наличие JSON данных
@@ -890,7 +890,7 @@ class AdParser:
                     await self._check_and_trigger_recovery()
                     raise ValueError("Authentication failed. Recovery triggered.")
                 raise ValueError(
-                    "No JSON data extracted: Firecrawl не вернул json (сбой статики/LLM fallback); "
+                    "No JSON data extracted: flippercrawl не вернул json (сбой статики/LLM fallback); "
                     "профиль my.cian.ru при этом доступен — это не обязательно проблема куков."
                 )
 
@@ -945,14 +945,14 @@ class AdParser:
 
     def _normalize_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Нормализует данные от Firecrawl для Pydantic моделей.
+        Нормализует данные от flippercrawl для Pydantic моделей.
 
         Поддерживает два формата:
         - Новый (вложенный): address={full, district, ...}, floor_info={current, all}
         - Старый (плоский): address_full, address_district, floor_current, floor_all
 
         Args:
-            data: Словарь от Firecrawl JSON
+            data: Словарь от flippercrawl JSON
 
         Returns:
             Нормализованный словарь для ParsedAdData

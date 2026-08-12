@@ -1,10 +1,10 @@
-﻿"""services.parsers.cian_active - парсер активных объявлений CIAN (через Firecrawl).
+﻿"""services.parsers.cian_active - парсер активных объявлений CIAN (через Flippercrawl).
 
 Структура:
     main.py          - оркестратор (запускает acquirer + пишет в БД)
     config.py        - настройки (Pydantic Settings, .env)
     acquirer/        - всё, что связано с самим парсингом:
-        cards.py     - парсинг отдельных объявлений (Firecrawl, rawHtml, stats API)
+        cards.py     - парсинг отдельных объявлений (Flippercrawl, rawHtml, stats API)
         search.py    - парсинг поисковых страниц (через cianparser)
         queue.py     - параллельное выполнение с concurrency
         models.py    - Pydantic-модели (ParsedAdData, AddressInfo, ...)

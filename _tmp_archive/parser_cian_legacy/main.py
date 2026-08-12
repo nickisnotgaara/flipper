@@ -1,4 +1,4 @@
-"""
+﻿"""
 services.parser_cian.main - Entry point orchestrator
 
 Оркестратор для сервиса парсинга Cian.
@@ -235,11 +235,11 @@ async def main(args):
             logger.info("✓ Parser Cian Service completed (--only-links)")
             return
 
-        logger.info("Initializing Firecrawl Parser...")
+        logger.info("Initializing flippercrawl Parser...")
         parser = AdParser(
             cookie_manager_url=settings.cookie_manager_url,
-            firecrawl_base_url=settings.firecrawl_base_url,
-            firecrawl_api_key=settings.firecrawl_api_key,
+            FLIPPERCRAWL_BASE_URL=settings.FLIPPERCRAWL_BASE_URL,
+            FLIPPERCRAWL_API_KEY=settings.FLIPPERCRAWL_API_KEY,
         )
         logger.info("✓ Parser initialized")
 

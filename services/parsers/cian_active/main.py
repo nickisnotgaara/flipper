@@ -233,11 +233,11 @@ async def main(args):
             logger.info("✓ Parser Cian Service completed (--only-links)")
             return
 
-        logger.info("Initializing Firecrawl Parser...")
+        logger.info("Initializing Flippercrawl Parser...")
         parser = AdParser(
             cookie_manager_url=settings.cookie_manager_url,
-            firecrawl_base_url=settings.firecrawl_base_url,
-            firecrawl_api_key=settings.firecrawl_api_key,
+            flippercrawl_base_url=settings.flippercrawl_base_url,
+            flippercrawl_api_key=settings.flippercrawl_api_key,
         )
         logger.info("✓ Parser initialized")
 

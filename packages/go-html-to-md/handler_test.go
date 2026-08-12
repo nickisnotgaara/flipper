@@ -1,4 +1,4 @@
-package main
+﻿package main
 
 import (
 	"bytes"
@@ -12,7 +12,8 @@ import (
 
 func TestHealthCheck(t *testing.T) {
 	converter := NewConverter()
-	handler := NewHandler(converter)
+	pool := NewWorkerPool(2, converter)
+	handler := NewHandler(pool)
 
 	router := mux.NewRouter()
 	handler.RegisterRoutes(router)
@@ -48,7 +49,8 @@ func TestHealthCheck(t *testing.T) {
 
 func TestIndex(t *testing.T) {
 	converter := NewConverter()
-	handler := NewHandler(converter)
+	pool := NewWorkerPool(2, converter)
+	handler := NewHandler(pool)
 
 	router := mux.NewRouter()
 	handler.RegisterRoutes(router)
@@ -82,7 +84,8 @@ func TestIndex(t *testing.T) {
 
 func TestConvertHTML_Success(t *testing.T) {
 	converter := NewConverter()
-	handler := NewHandler(converter)
+	pool := NewWorkerPool(2, converter)
+	handler := NewHandler(pool)
 
 	router := mux.NewRouter()
 	handler.RegisterRoutes(router)
@@ -165,7 +168,8 @@ func TestConvertHTML_Success(t *testing.T) {
 
 func TestConvertHTML_EmptyHTML(t *testing.T) {
 	converter := NewConverter()
-	handler := NewHandler(converter)
+	pool := NewWorkerPool(2, converter)
+	handler := NewHandler(pool)
 
 	router := mux.NewRouter()
 	handler.RegisterRoutes(router)
@@ -201,7 +205,8 @@ func TestConvertHTML_EmptyHTML(t *testing.T) {
 
 func TestConvertHTML_InvalidJSON(t *testing.T) {
 	converter := NewConverter()
-	handler := NewHandler(converter)
+	pool := NewWorkerPool(2, converter)
+	handler := NewHandler(pool)
 
 	router := mux.NewRouter()
 	handler.RegisterRoutes(router)
