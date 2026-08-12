@@ -143,9 +143,13 @@ class Settings(BaseSettings):
     def __init__(self, **data):
         super().__init__(**data)
 
+        # self-hosted Flippercrawl не требует API-ключа: если FLIPPERCRAWL_API_KEY
+        # не задан — работаем без авторизации (Flippercrawl по умолчанию AUTH_ENABLED=false).
+        # Если ключ есть — передаём в Authorization: Bearer, иначе пропускаем.
         if not self.flippercrawl_api_key:
-            raise ValueError(
-                "FLIPPERCRAWL_API_KEY не установлена в .env файле."
+            logger.info(
+                "FLIPPERCRAWL_API_KEY не задан — работаем без Authorization "
+                "(self-hosted Flippercrawl, AUTH_ENABLED=false)."
             )
 
         self._pop_obsolete_scraper_api_env()
