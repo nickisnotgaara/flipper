@@ -1,5 +1,6 @@
 'use client';
 
+import React from 'react';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
@@ -249,7 +250,7 @@ export default function DashboardView() {
             const Icon = q.icon;
             const sharedProps = q.external
               ? { as: 'a' as const, href: q.href, target: '_blank', rel: 'noopener noreferrer' }
-              : { as: Link, href: q.href };
+              : { as: Link as React.ElementType, href: q.href };
             return (
               <Card
                 key={q.label}

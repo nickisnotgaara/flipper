@@ -17,3 +17,19 @@ export function gristDocUrl(docId: string, tableId?: string): string {
   const base = `${GRIST_URL}/${docId}/p/1`;
   return tableId ? `${base}?table=${tableId}` : base;
 }
+
+// === Stub helpers (left for legacy /_disabled_analytics page; unused by the
+// current app which opens the live Grist UI in a new tab). They are kept here
+// so the production build still type-checks the disabled page.
+export async function listTables(_docId: string): Promise<Array<{ id: string; fields: Record<string, unknown> }>> {
+  return [];
+}
+export async function sqlRecords(_docId: string, _sql: string): Promise<unknown[]> {
+  return [];
+}
+export async function tableColumns(_docId: string, _tableId: string): Promise<Array<{ id: string; label: string }>> {
+  return [];
+}
+export async function tableRecords(_docId: string, _tableId: string, _opts: Record<string, unknown> = {}): Promise<{ records: Array<{ id: number; fields: Record<string, unknown> }> }> {
+  return { records: [] };
+}

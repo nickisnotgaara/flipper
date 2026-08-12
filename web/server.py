@@ -58,6 +58,7 @@ from packages.flipper_db import (
 
 WEB_DIR = Path(__file__).resolve().parent
 STATIC_DIR = WEB_DIR / "static"
+NEXT_OUT_DIR = WEB_DIR / "next" / "out"  # Next.js static export (production build)
 
 app = FastAPI(title="Flipper Map", version="0.5.0")
 
@@ -91,15 +92,51 @@ if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
-@app.get("/")
-def index():
-    idx = STATIC_DIR / "index.html"
-    if idx.exists():
-        return FileResponse(idx)
-    return JSONResponse(
-        {"error": "index.html not found. Use the Next.js app at http://127.0.0.1:3000/"},
-        status_code=200,
-    )
+# ---- Next.js static export (production build at web/next/out) ----
+# Serves /, /map, /dashboard, /_next/*, /favicon.ico, etc.
+# Falls through to API routes for /api/* (those are defined further down).
+if NEXT_OUT_DIR.exists():
+    @app.get("/")
+    def index_next():
+        return FileResponse(NEXT_OUT_DIR / "index.html")
+
+    @app.get("/map")
+    @app.get("/map/")
+    def map_next():
+        idx = NEXT_OUT_DIR / "map" / "index.html"
+        if idx.exists():
+            return FileResponse(idx)
+        return FileResponse(NEXT_OUT_DIR / "index.html")
+
+    @app.get("/dashboard")
+    @app.get("/dashboard/")
+    def dashboard_next():
+        idx = NEXT_OUT_DIR / "dashboard" / "index.html"
+        if idx.exists():
+            return FileResponse(idx)
+        return FileResponse(NEXT_OUT_DIR / "index.html")
+
+    # /_next/static/* (CSS/JS chunks) and other Next.js assets.
+    app.mount("/_next", StaticFiles(directory=str(NEXT_OUT_DIR / "_next")), name="next_assets")
+
+    # 404 page from the Next.js build.
+    @app.get("/_not-found")
+    @app.get("/_not-found/")
+    def not_found_next():
+        idx = NEXT_OUT_DIR / "404.html"
+        if idx.exists():
+            return FileResponse(idx, status_code=404)
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+else:
+    @app.get("/")
+    def index():
+        idx = STATIC_DIR / "index.html"
+        if idx.exists():
+            return FileResponse(idx)
+        return JSONResponse(
+            {"error": "index.html not found. Run `pnpm build` in web/next/ or use `npm run dev` at http://127.0.0.1:3000/"},
+            status_code=200,
+        )
 
 
 # Active offers live in active_ads (source='cian_active'). No view,
