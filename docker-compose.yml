@@ -142,6 +142,8 @@ services:
       # В Docker хост — это имя сервиса app_postgres, а не 127.0.0.1
       DATABASE_URL: "postgresql+asyncpg://flipper:flipper_secret@app_postgres:5432/flipper"
       FLIPPERCRAWL_BASE_URL: "${PARSER_FLIPPERCRAWL_BASE_URL:-http://host.docker.internal:3002}"
+      # Grist на host.docker.internal:8484 (127.0.0.1:8484 в .env уже публикуется на хосте)
+      GRIST_BASE: "http://host.docker.internal:8484"
     volumes:
       - ${FLIPPER_CREDENTIALS_SOURCE:-./credentials.json}:/app/credentials.json
       - ${FLIPPER_DATA_SOURCE:-./data}:/app/data
@@ -171,6 +173,7 @@ services:
       <<: *strip-proxy-env
       # В Docker хост — это имя сервиса app_postgres, а не 127.0.0.1
       DATABASE_URL: "postgresql+asyncpg://flipper:flipper_secret@app_postgres:5432/flipper"
+      GRIST_BASE: "http://host.docker.internal:8484"
     volumes:
       - ${FLIPPER_DATA_SOURCE:-./data}:/app/data
     depends_on:
